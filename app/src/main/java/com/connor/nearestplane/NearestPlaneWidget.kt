@@ -47,7 +47,8 @@ import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
-import androidx.glance.layout.wrapContentHeight
+import androidx.glance.layout.ColumnScope
+import androidx.glance.layout.fillMaxSize
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextAlign
@@ -104,14 +105,17 @@ class NearestPlaneWidget : GlanceAppWidget() {
             actionParametersOf(PlaneDetailActivity.HEX_PARAM to prefs[WidgetState.HEX].orEmpty())
         )
 
+        // Fills whatever space the widget is given: a flight's rows spread out to
+        // the full height; the one-line states sit in the middle.
+        val showing = status !in listOf("no_permission", "never", "error", "empty")
         Column(
             modifier = GlanceModifier
-                .fillMaxWidth()
-                .wrapContentHeight()
+                .fillMaxSize()
                 .background(Ink.card)
                 .cornerRadius(28.dp)
                 .clickable(tap)
-                .padding(horizontal = sidePad.dp, vertical = 16.dp)
+                .padding(horizontal = sidePad.dp, vertical = 16.dp),
+            verticalAlignment = if (showing) Alignment.Vertical.Top else Alignment.Vertical.CenterVertically
         ) {
             when (status) {
                 "no_permission" -> Header("Overhead", "No location set · tap to set it up", "", "", null)
@@ -130,7 +134,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
     private fun refresh(): Action = actionRunCallback<PlaneRefreshAction>()
 
     @Composable
-    private fun Pass(prefs: Preferences) {
+    private fun ColumnScope.Pass(prefs: Preferences) {
         val airline = prefs[WidgetState.AIRLINE].orEmpty()
         val type = prefs[WidgetState.TYPE_NAME].orEmpty()
         val emergency = prefs[WidgetState.EMERGENCY].orEmpty()
@@ -146,7 +150,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
             warn = hasProblem(prefs)
         )
 
-        Spacer(GlanceModifier.height(14.dp))
+        Gap()
 
         // The layout never changes shape: anything the route lookup didn't
         // find shows as "-", and the plane sits mid-path with nothing flown.
@@ -159,7 +163,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
             progress = progress
         )
 
-        Spacer(GlanceModifier.height(14.dp))
+        Gap()
         Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.Vertical.Top) {
             Box(modifier = GlanceModifier.defaultWeight()) {
                 TimeColumn(
@@ -183,9 +187,10 @@ class NearestPlaneWidget : GlanceAppWidget() {
             }
         }
 
-        Spacer(GlanceModifier.height(14.dp))
+        Gap()
+        // The bottom row sits a little taller: more room either side of its line.
         Box(modifier = GlanceModifier.fillMaxWidth().height(1.dp).background(Ink.rule)) {}
-        Spacer(GlanceModifier.height(10.dp))
+        Spacer(GlanceModifier.height(12.dp))
 
         val stats = listOf(prefs[WidgetState.POSITION].orEmpty(), prefs[WidgetState.DETAIL].orEmpty())
             .filter { it.isNotBlank() }.joinToString(" · ")
@@ -206,6 +211,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
                 )
             }
         }
+        Spacer(GlanceModifier.height(2.dp))
     }
 
     /**
@@ -240,6 +246,13 @@ class NearestPlaneWidget : GlanceAppWidget() {
                 }
             }
         }
+    }
+
+    /** A gap between rows: at least 8dp, plus an equal share of the spare height. */
+    @Composable
+    private fun ColumnScope.Gap() {
+        Spacer(GlanceModifier.height(8.dp))
+        Spacer(GlanceModifier.defaultWeight())
     }
 
     @Composable
