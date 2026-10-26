@@ -34,4 +34,5 @@ object WidgetState {
     val TO_CITY = stringPreferencesKey("to_city")
     val PROGRESS = intPreferencesKey("progress")
     val ETA = stringPreferencesKey("eta")                // "Lands ~4 min"
+    val LOGO = stringPreferencesKey("logo")              // "U2" when that logo is saved on the phone
 }

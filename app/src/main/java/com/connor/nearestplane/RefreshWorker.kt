@@ -100,6 +100,7 @@ class RefreshWorker(
                 it[WidgetState.TO_CITY] = ""
                 it[WidgetState.PROGRESS] = -1
                 it[WidgetState.ETA] = ""
+                it[WidgetState.LOGO] = ""
             }
             Diagnostics.noteOk(context, "plane")
             return Result.success()
@@ -108,6 +109,11 @@ class RefreshWorker(
         // Shared with the detail screen, so the two can't disagree about a route.
         val report = PlaneSummary.build(context, plane)
         report.enrichError?.let { Diagnostics.noteError(context, "plane", "enrich: $it") }
+
+        // A missing logo never costs the tile: no logo just means the code badge.
+        val logo = report.route?.airlineIata
+            ?.let { code -> runCatching { AirlineLogos.ensure(context, code) }.getOrDefault(false).let { if (it) code else "" } }
+            .orEmpty()
 
         write(context) { p ->
             p[WidgetState.STATUS] = "ok"
@@ -133,6 +139,7 @@ class RefreshWorker(
             p[WidgetState.TO_CITY] = pass.toCity
             p[WidgetState.PROGRESS] = pass.progress
             p[WidgetState.ETA] = pass.eta
+            p[WidgetState.LOGO] = logo
         }
         Diagnostics.noteOk(context, "plane")
         return Result.success()

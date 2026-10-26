@@ -34,7 +34,9 @@ data class Airport(
 data class FlightRoute(
     val airline: String?,
     val origin: Airport?,
-    val destination: Airport?
+    val destination: Airport?,
+    /** Two-letter airline code ("U2"), used to fetch the airline's logo. */
+    val airlineIata: String? = null
 )
 
 /** Airframe facts, keyed by Mode-S hex. These never change for a given hex. */
@@ -163,7 +165,8 @@ object AdsbdbClient {
                     FlightRoute(
                         airline = it.optJSONObject("airline")?.optString("name")?.ifBlank { null },
                         origin = airport(it.optJSONObject("origin")),
-                        destination = airport(it.optJSONObject("destination"))
+                        destination = airport(it.optJSONObject("destination")),
+                        airlineIata = it.optJSONObject("airline")?.optString("iata")?.ifBlank { null }
                     )
                 }
             )
@@ -235,7 +238,11 @@ object AdsbdbClient {
             val lon = g[4].toDoubleOrNull() ?: return null
             return Airport(g[0], g[1].ifBlank { null }, g[2].ifBlank { null }, lat, lon)
         }
-        FlightRoute(f.getOrNull(1)?.ifBlank { null }, ap(f.getOrNull(2)), ap(f.getOrNull(3)))
+        // The airline code was added later; older entries simply have none.
+        FlightRoute(
+            f.getOrNull(1)?.ifBlank { null }, ap(f.getOrNull(2)), ap(f.getOrNull(3)),
+            f.getOrNull(4)?.ifBlank { null }
+        )
     }.getOrNull()
 
     private suspend fun writeRoute(context: Context, callsign: String, r: FlightRoute?) {
@@ -246,7 +253,7 @@ object AdsbdbClient {
         put(
             context, key(RT, callsign),
             if (r == null) "$now|$NONE"
-            else "$now|${r.airline.orEmpty()}|${enc(r.origin)}|${enc(r.destination)}"
+            else "$now|${r.airline.orEmpty()}|${enc(r.origin)}|${enc(r.destination)}|${r.airlineIata.orEmpty()}"
         )
     }
 

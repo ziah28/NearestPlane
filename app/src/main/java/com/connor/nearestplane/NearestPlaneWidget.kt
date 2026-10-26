@@ -125,6 +125,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
             title = prefs[WidgetState.TITLE].orEmpty(),
             sub = if (emergency.isNotBlank()) "$emergency · $sub" else sub,
             badge = prefs[WidgetState.BADGE].orEmpty(),
+            logo = prefs[WidgetState.LOGO].orEmpty(),
             age = ageText(prefs),
             onRefresh = refresh(),
             warn = hasProblem(prefs)
@@ -175,10 +176,19 @@ class NearestPlaneWidget : GlanceAppWidget() {
         badge: String,
         age: String,
         onRefresh: Action?,
-        warn: Boolean = false
+        warn: Boolean = false,
+        logo: String = ""
     ) {
+        val logoBitmap = AirlineLogos.bitmap(LocalContext.current, logo)
         Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.Vertical.CenterVertically) {
-            Box(
+            if (logoBitmap != null) {
+                Image(
+                    provider = ImageProvider(logoBitmap),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = GlanceModifier.size(36.dp).cornerRadius(10.dp)
+                )
+            } else Box(
                 modifier = GlanceModifier.size(36.dp).background(Ink.badge).cornerRadius(10.dp),
                 contentAlignment = Alignment.Center
             ) {
