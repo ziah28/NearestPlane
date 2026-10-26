@@ -132,17 +132,16 @@ class NearestPlaneWidget : GlanceAppWidget() {
 
         Spacer(GlanceModifier.height(14.dp))
 
+        // The layout never changes shape: anything the route lookup didn't
+        // find shows as "-", and the plane sits mid-path with nothing flown.
         val progress = prefs[WidgetState.PROGRESS] ?: -1
-        val from = prefs[WidgetState.FROM_CODE].orEmpty()
-        val to = prefs[WidgetState.TO_CODE].orEmpty()
-        if (progress >= 0 && from.isNotBlank() && to.isNotBlank()) {
-            Route(from, prefs[WidgetState.FROM_CITY].orEmpty(), to, prefs[WidgetState.TO_CITY].orEmpty(), progress)
-        } else {
-            Text(
-                text = "Route unknown",
-                style = TextStyle(fontSize = 13.sp, color = ColorProvider(Ink.muted))
-            )
-        }
+        Route(
+            from = prefs[WidgetState.FROM_CODE].orEmpty().ifBlank { UNKNOWN },
+            fromCity = prefs[WidgetState.FROM_CITY].orEmpty().ifBlank { UNKNOWN },
+            to = prefs[WidgetState.TO_CODE].orEmpty().ifBlank { UNKNOWN },
+            toCity = prefs[WidgetState.TO_CITY].orEmpty().ifBlank { UNKNOWN },
+            progress = progress
+        )
 
         Spacer(GlanceModifier.height(14.dp))
         Box(modifier = GlanceModifier.fillMaxWidth().height(1.dp).background(Ink.rule)) {}
@@ -257,7 +256,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
             Spacer(GlanceModifier.width(gap.dp))
             Image(
                 provider = ImageProvider(pathBitmap(context, pathWidth, progress)),
-                contentDescription = "$progress% of the way from $from to $to",
+                contentDescription = if (progress >= 0) "$progress% of the way from $from to $to" else "Route unknown",
                 contentScale = ContentScale.FillBounds,
                 modifier = GlanceModifier.size(pathWidth.dp, 24.dp)
             )
@@ -306,7 +305,8 @@ class NearestPlaneWidget : GlanceAppWidget() {
         val canvas = Canvas(bmp)
         val cy = h / 2f
         val planeSize = 22 * d
-        val x = (w * progress.coerceIn(0, 100) / 100f)
+        val known = progress >= 0
+        val x = (if (known) w * progress.coerceIn(0, 100) / 100f else w / 2f)
             .coerceIn(planeSize / 2, w - planeSize / 2)
 
         val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -322,7 +322,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
             strokeWidth = 2 * d
             style = Paint.Style.STROKE
         }
-        canvas.drawLine(0f, cy, x, cy, done)
+        if (known) canvas.drawLine(0f, cy, x, cy, done)
 
         // A card-coloured gap behind the plane so the line doesn't run through it.
         val gapPaint = Paint().apply { color = Ink.card.toArgb() }
@@ -369,6 +369,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
 
     companion object {
         const val REFRESHING = "refreshing…"
+        const val UNKNOWN = "-"
     }
 }
 
