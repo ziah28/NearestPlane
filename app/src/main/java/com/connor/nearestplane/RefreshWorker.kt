@@ -92,6 +92,13 @@ class RefreshWorker(
                 it[WidgetState.STALE_NOTE] = fix.staleNote.orEmpty()
                 it[WidgetState.PINNED] = fix.source == PositionSource.FIXED
                 it[WidgetState.UPDATED_AT] = System.currentTimeMillis()
+                it[WidgetState.BADGE] = ""
+                it[WidgetState.FROM_CODE] = ""
+                it[WidgetState.FROM_CITY] = ""
+                it[WidgetState.TO_CODE] = ""
+                it[WidgetState.TO_CITY] = ""
+                it[WidgetState.PROGRESS] = -1
+                it[WidgetState.ETA] = ""
             }
             Diagnostics.noteOk(context, "plane")
             return Result.success()
@@ -116,6 +123,15 @@ class RefreshWorker(
             p[WidgetState.STALE_NOTE] = fix.staleNote.orEmpty()
             p[WidgetState.PINNED] = fix.source == PositionSource.FIXED
             p[WidgetState.UPDATED_AT] = System.currentTimeMillis()
+
+            val pass = BoardingPass.from(plane, report)
+            p[WidgetState.BADGE] = pass.badge
+            p[WidgetState.FROM_CODE] = pass.fromCode
+            p[WidgetState.FROM_CITY] = pass.fromCity
+            p[WidgetState.TO_CODE] = pass.toCode
+            p[WidgetState.TO_CITY] = pass.toCity
+            p[WidgetState.PROGRESS] = pass.progress
+            p[WidgetState.ETA] = pass.eta
         }
         Diagnostics.noteOk(context, "plane")
         return Result.success()

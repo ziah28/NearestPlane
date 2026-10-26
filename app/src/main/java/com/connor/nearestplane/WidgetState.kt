@@ -1,6 +1,7 @@
 package com.connor.nearestplane
 
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 
@@ -23,4 +24,14 @@ object WidgetState {
     // A pinned place never goes stale, so it never earns a note — which made a
     // forgotten pin look exactly like a tile that had stopped following you.
     val PINNED = booleanPreferencesKey("pinned")
+
+    // Boarding-pass layout: the route as two airport codes with the plane on a
+    // path between them. PROGRESS is 0..100, or -1 when there is no usable route.
+    val BADGE = stringPreferencesKey("badge")            // "EZY", shown where the logo goes
+    val FROM_CODE = stringPreferencesKey("from_code")    // "AGP"
+    val FROM_CITY = stringPreferencesKey("from_city")    // "Málaga"
+    val TO_CODE = stringPreferencesKey("to_code")
+    val TO_CITY = stringPreferencesKey("to_city")
+    val PROGRESS = intPreferencesKey("progress")
+    val ETA = stringPreferencesKey("eta")                // "Lands ~4 min"
 }

@@ -1,21 +1,30 @@
 package com.connor.nearestplane
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.DashPathEffect
+import android.graphics.Paint
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.Preferences
+import androidx.glance.ColorFilter
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
-import androidx.glance.GlanceTheme
-import androidx.glance.ColorFilter
 import androidx.glance.Image
 import androidx.glance.ImageProvider
+import androidx.glance.LocalContext
+import androidx.glance.LocalSize
+import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.cornerRadius
@@ -26,187 +35,335 @@ import androidx.glance.currentState
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
 import androidx.glance.layout.Column
+import androidx.glance.layout.ContentScale
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxWidth
+import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
 import androidx.glance.layout.wrapContentHeight
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
+import androidx.glance.text.TextAlign
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
-import androidx.glance.action.Action
 import java.util.concurrent.TimeUnit
 
+/**
+ * The boarding-pass tile: airline and callsign on top, the route as two airport
+ * codes with the plane on a path between them, and distance, height and speed
+ * along the bottom.
+ */
 class NearestPlaneWidget : GlanceAppWidget() {
 
+    // Exact, so the route path can be drawn to the tile's real width.
+    override val sizeMode = SizeMode.Exact
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val look = AppSettings.appearance(context)
-        provideContent {
-            GlanceTheme { Body(currentState(), look) }
-        }
+        provideContent { Body(currentState()) }
     }
 
+    private object Ink {
+        val card = Color(0xFFFFFFFF)
+        val ink = Color(0xFF0F1B2D)
+        val muted = Color(0xFF5A6472)
+        val rule = Color(0xFFE4E8EE)
+        val track = Color(0xFFB8C0CC)
+        val badge = Color(0xFFEEF1F6)
+        val accent = Color(0xFF2F6FED)
+        val warn = Color(0xFFB4400B)
+    }
+
+    private val codeWidth = 76
+    private val gap = 12
+    private val sidePad = 20
+
     @Composable
-    private fun Body(prefs: Preferences, look: AppSettings.Appearance) {
+    private fun Body(prefs: Preferences) {
         val status = prefs[WidgetState.STATUS] ?: "never"
 
         // A tile that says "open the app" and then doesn't when tapped is worse
-        // than one that says nothing. Everywhere else, tap opens the detail
-        // screen, which also kicks a refresh of the tile behind it — so this
-        // still forces a refresh, it just shows you something while it works.
+        // than one that says nothing. Everywhere else, tap opens the detail screen.
         val tap = if (status == "no_permission") actionStartActivity<MainActivity>()
         else actionStartActivity<PlaneDetailActivity>()
 
-        // wrapContentHeight rather than fillMaxSize: the tile shrinks to its
-        // content instead of padding out to the full cell.
-        Row(
+        Column(
             modifier = GlanceModifier
                 .fillMaxWidth()
                 .wrapContentHeight()
-                .background(WidgetPalette.background(look))
-                .cornerRadius(16.dp)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .clickable(tap),
-            verticalAlignment = Alignment.Vertical.Top
+                .background(Ink.card)
+                .cornerRadius(28.dp)
+                .clickable(tap)
+                .padding(horizontal = sidePad.dp, vertical = 16.dp)
         ) {
-            // defaultWeight so the text takes the room the button doesn't, and
-            // the button stays pinned to the right edge at any tile width.
-            Column(modifier = GlanceModifier.defaultWeight()) {
-                when (status) {
-                    "no_permission" -> {
-                        Line("No location set", 18, look, FontWeight.Medium)
-                        Line("Tap to set it up", 14, look, muted = true)
-                    }
-                    "never" -> {
-                        Line("Tap to find a plane", 18, look, FontWeight.Medium)
-                    }
-                    "error" -> {
-                        Line("Tap to retry", 17, look, FontWeight.Medium)
-                        Line(prefs[WidgetState.STALE_NOTE].orEmpty(), 14, look, muted = true)
-                    }
-                    else -> Content(prefs, look)
-                }
-            }
-
-            // No refresh button when there's no location to refresh from: the
-            // button would be honest about running and useless about the result.
-            if (status != "no_permission") {
-                RefreshButton(look, actionRunCallback<PlaneRefreshAction>())
+            when (status) {
+                "no_permission" -> Header("Overhead", "No location set · tap to set it up", "", "", null)
+                "never" -> Header("Overhead", "Tap the arrow to find the plane overhead", "", "", refresh())
+                "error" -> Header("Overhead", "Couldn't reach the flight data", "", ageText(prefs), refresh(), warn = true)
+                "empty" -> Header(
+                    prefs[WidgetState.TITLE] ?: "Clear skies",
+                    prefs[WidgetState.POSITION].orEmpty(),
+                    "", ageText(prefs), refresh(), warn = hasProblem(prefs)
+                )
+                else -> Pass(prefs)
             }
         }
     }
 
-    /**
-     * A tap target of its own, inside a tile that is itself tappable. The inner
-     * clickable wins, so this refreshes in place instead of opening the detail
-     * screen — which is the whole point: the tile is usually right, and you
-     * just want it to be right *now*.
-     */
+    private fun refresh(): Action = actionRunCallback<PlaneRefreshAction>()
+
     @Composable
-    private fun RefreshButton(look: AppSettings.Appearance, onClick: Action) {
-        Box(
-            modifier = GlanceModifier
-                // Padding rather than a bigger glyph: it buys a tap target
-                // without spending tile width on something read at a glance.
-                .padding(start = 8.dp, top = 2.dp, bottom = 8.dp, end = 2.dp)
-                .clickable(onClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                provider = ImageProvider(R.drawable.ic_refresh),
-                contentDescription = "Refresh",
-                modifier = GlanceModifier.size(WidgetPalette.size(18, look).dp),
-                colorFilter = ColorFilter.tint(WidgetPalette.secondaryText(look))
+    private fun Pass(prefs: Preferences) {
+        val airline = prefs[WidgetState.AIRLINE].orEmpty()
+        val type = prefs[WidgetState.TYPE_NAME].orEmpty()
+        val emergency = prefs[WidgetState.EMERGENCY].orEmpty()
+        val sub = listOf(airline, type).filter { it.isNotBlank() }.joinToString(" · ")
+
+        Header(
+            title = prefs[WidgetState.TITLE].orEmpty(),
+            sub = if (emergency.isNotBlank()) "$emergency · $sub" else sub,
+            badge = prefs[WidgetState.BADGE].orEmpty(),
+            age = ageText(prefs),
+            onRefresh = refresh(),
+            warn = hasProblem(prefs)
+        )
+
+        Spacer(GlanceModifier.height(14.dp))
+
+        val progress = prefs[WidgetState.PROGRESS] ?: -1
+        val from = prefs[WidgetState.FROM_CODE].orEmpty()
+        val to = prefs[WidgetState.TO_CODE].orEmpty()
+        if (progress >= 0 && from.isNotBlank() && to.isNotBlank()) {
+            Route(from, prefs[WidgetState.FROM_CITY].orEmpty(), to, prefs[WidgetState.TO_CITY].orEmpty(), progress)
+        } else {
+            Text(
+                text = "Route unknown",
+                style = TextStyle(fontSize = 13.sp, color = ColorProvider(Ink.muted))
             )
         }
+
+        Spacer(GlanceModifier.height(14.dp))
+        Box(modifier = GlanceModifier.fillMaxWidth().height(1.dp).background(Ink.rule)) {}
+        Spacer(GlanceModifier.height(10.dp))
+
+        val stats = listOf(prefs[WidgetState.POSITION].orEmpty(), prefs[WidgetState.DETAIL].orEmpty())
+            .filter { it.isNotBlank() }.joinToString(" · ")
+        Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.Vertical.CenterVertically) {
+            Text(
+                text = stats,
+                maxLines = 1,
+                modifier = GlanceModifier.defaultWeight(),
+                style = TextStyle(fontSize = 12.sp, color = ColorProvider(Ink.muted))
+            )
+            val eta = prefs[WidgetState.ETA].orEmpty()
+            if (eta.isNotBlank()) {
+                Spacer(GlanceModifier.width(8.dp))
+                Text(
+                    text = eta,
+                    maxLines = 1,
+                    style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ColorProvider(Ink.ink))
+                )
+            }
+        }
     }
 
     @Composable
-    private fun Content(prefs: Preferences, look: AppSettings.Appearance) {
-        val emergency = prefs[WidgetState.EMERGENCY].orEmpty()
-
-        // Line 1: callsign, emergency flag if any, airline pushed alongside.
-        Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
-            Line(prefs[WidgetState.TITLE].orEmpty(), 22, look, FontWeight.Bold)
-            if (emergency.isNotBlank()) {
-                Spacer(GlanceModifier.width(6.dp))
+    private fun Header(
+        title: String,
+        sub: String,
+        badge: String,
+        age: String,
+        onRefresh: Action?,
+        warn: Boolean = false
+    ) {
+        Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.Vertical.CenterVertically) {
+            Box(
+                modifier = GlanceModifier.size(36.dp).background(Ink.badge).cornerRadius(10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (badge.isNotBlank()) {
+                    Text(
+                        text = badge,
+                        style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ColorProvider(Ink.ink))
+                    )
+                } else {
+                    Image(
+                        provider = ImageProvider(R.drawable.ic_plane),
+                        contentDescription = null,
+                        modifier = GlanceModifier.size(18.dp),
+                        colorFilter = ColorFilter.tint(ColorProvider(Ink.muted))
+                    )
+                }
+            }
+            Spacer(GlanceModifier.width(12.dp))
+            Column(modifier = GlanceModifier.defaultWeight()) {
                 Text(
-                    text = emergency,
+                    text = title,
+                    maxLines = 1,
+                    style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Bold, color = ColorProvider(Ink.ink))
+                )
+                if (sub.isNotBlank()) {
+                    Text(
+                        text = sub,
+                        maxLines = 1,
+                        style = TextStyle(fontSize = 12.sp, color = ColorProvider(Ink.muted))
+                    )
+                }
+            }
+            if (age.isNotBlank()) {
+                Spacer(GlanceModifier.width(8.dp))
+                Text(
+                    text = age,
+                    maxLines = 1,
                     style = TextStyle(
-                        fontSize = WidgetPalette.size(13, look).sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ColorProvider(Color(0xFFEF5350))
+                        fontSize = 11.sp,
+                        fontWeight = if (warn) FontWeight.Bold else FontWeight.Normal,
+                        color = ColorProvider(if (warn) Ink.warn else Ink.muted)
                     )
                 )
             }
-            val airline = prefs[WidgetState.AIRLINE].orEmpty()
-            if (airline.isNotBlank()) {
-                Spacer(GlanceModifier.width(6.dp))
-                Line(airline, 14, look, muted = true, maxLines = 1)
+            if (onRefresh != null) {
+                Spacer(GlanceModifier.width(8.dp))
+                // Its own tap target inside a tappable tile: the inner clickable
+                // wins, so this refreshes in place instead of opening the detail.
+                Box(
+                    modifier = GlanceModifier.size(44.dp).background(Ink.badge).cornerRadius(22.dp).clickable(onRefresh),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        provider = ImageProvider(R.drawable.ic_refresh),
+                        contentDescription = "Find the plane overhead",
+                        modifier = GlanceModifier.size(18.dp),
+                        colorFilter = ColorFilter.tint(ColorProvider(Ink.muted))
+                    )
+                }
             }
         }
-
-        // Line 2: route, with timing appended so it doesn't need its own row.
-        val route = prefs[WidgetState.ROUTE].orEmpty()
-        val timing = prefs[WidgetState.TIMING].orEmpty()
-        if (route.isNotBlank()) {
-            Line(
-                listOf(route, timing).filter { it.isNotBlank() }.joinToString("  "),
-                15, look, FontWeight.Medium, maxLines = 1
-            )
-        }
-
-        // Line 3: full type name.
-        Line(prefs[WidgetState.TYPE_NAME].orEmpty(), 15, look, FontWeight.Medium, maxLines = 1)
-
-        // Line 4: any note first, then distance, altitude, speed and age. The
-        // note used to come last, and a line this long is cut from the end — so
-        // "location 26h old" was the part nobody saw, on the tile whose distance
-        // and bearing are measured from that very location.
-        val note = prefs[WidgetState.STALE_NOTE].orEmpty()
-        val tail = listOf(
-            note,
-            if (prefs[WidgetState.PINNED] == true) "pinned" else "",
-            prefs[WidgetState.POSITION].orEmpty(),
-            prefs[WidgetState.DETAIL].orEmpty(),
-            if (note.isBlank()) ageLabel(prefs[WidgetState.UPDATED_AT] ?: 0L) else ""
-        ).filter { it.isNotBlank() }.joinToString(" · ")
-        Line(tail, 14, look, muted = true, maxLines = 1)
     }
 
     @Composable
-    private fun Line(
-        text: String,
-        size: Int,
-        look: AppSettings.Appearance,
-        weight: FontWeight = FontWeight.Normal,
-        muted: Boolean = false,
-        maxLines: Int = 2
-    ) {
-        if (text.isBlank()) return
-        Text(
-            text = text,
-            maxLines = maxLines,
-            style = TextStyle(
-                fontSize = WidgetPalette.size(size, look).sp,
-                fontWeight = WidgetPalette.weight(weight, look),
-                color = if (muted) WidgetPalette.secondaryText(look)
-                else WidgetPalette.primaryText(look)
+    private fun Route(from: String, fromCity: String, to: String, toCity: String, progress: Int) {
+        val context = LocalContext.current
+        val tileWidth = LocalSize.current.width.value
+        val pathWidth = (tileWidth - sidePad * 2 - codeWidth * 2 - gap * 2).coerceAtLeast(40f)
+
+        Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.Vertical.CenterVertically) {
+            Column(modifier = GlanceModifier.width(codeWidth.dp)) {
+                Code(from, TextAlign.Start)
+                City(fromCity, TextAlign.Start)
+            }
+            Spacer(GlanceModifier.width(gap.dp))
+            Image(
+                provider = ImageProvider(pathBitmap(context, pathWidth, progress)),
+                contentDescription = "$progress% of the way from $from to $to",
+                contentScale = ContentScale.FillBounds,
+                modifier = GlanceModifier.size(pathWidth.dp, 24.dp)
             )
+            Spacer(GlanceModifier.width(gap.dp))
+            Column(
+                modifier = GlanceModifier.width(codeWidth.dp),
+                horizontalAlignment = Alignment.Horizontal.End
+            ) {
+                Code(to, TextAlign.End)
+                City(toCity, TextAlign.End)
+            }
+        }
+    }
+
+    @Composable
+    private fun Code(code: String, align: TextAlign) {
+        Text(
+            text = code,
+            maxLines = 1,
+            modifier = GlanceModifier.fillMaxWidth(),
+            style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold, color = ColorProvider(Ink.ink), textAlign = align)
         )
+    }
+
+    @Composable
+    private fun City(city: String, align: TextAlign) {
+        if (city.isBlank()) return
+        Text(
+            text = city,
+            maxLines = 1,
+            modifier = GlanceModifier.fillMaxWidth(),
+            style = TextStyle(fontSize = 11.sp, color = ColorProvider(Ink.muted), textAlign = align)
+        )
+    }
+
+    /**
+     * Glance can't place one element over another at a percentage, so the path
+     * is drawn as a picture: dashed track, solid line behind the plane, plane
+     * at the flight's progress.
+     */
+    private fun pathBitmap(context: Context, widthDp: Float, progress: Int): Bitmap {
+        val d = context.resources.displayMetrics.density
+        val w = (widthDp * d).toInt().coerceAtLeast(1)
+        val h = (24 * d).toInt().coerceAtLeast(1)
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val cy = h / 2f
+        val planeSize = 22 * d
+        val x = (w * progress.coerceIn(0, 100) / 100f)
+            .coerceIn(planeSize / 2, w - planeSize / 2)
+
+        val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Ink.track.toArgb()
+            strokeWidth = 2 * d
+            style = Paint.Style.STROKE
+            pathEffect = DashPathEffect(floatArrayOf(5 * d, 4 * d), 0f)
+        }
+        canvas.drawLine(0f, cy, w.toFloat(), cy, track)
+
+        val done = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Ink.accent.toArgb()
+            strokeWidth = 2 * d
+            style = Paint.Style.STROKE
+        }
+        canvas.drawLine(0f, cy, x, cy, done)
+
+        // A card-coloured gap behind the plane so the line doesn't run through it.
+        val gapPaint = Paint().apply { color = Ink.card.toArgb() }
+        canvas.drawRect(x - planeSize / 2 - 2 * d, 0f, x + planeSize / 2 + 2 * d, h.toFloat(), gapPaint)
+
+        ContextCompat.getDrawable(context, R.drawable.ic_plane)?.mutate()?.let { plane ->
+            plane.setTint(Ink.accent.toArgb())
+            val left = (x - planeSize / 2).toInt()
+            val top = ((h - planeSize) / 2).toInt()
+            plane.setBounds(left, top, left + planeSize.toInt(), top + planeSize.toInt())
+            plane.draw(canvas)
+        }
+        return bmp
+    }
+
+    private fun hasProblem(prefs: Preferences): Boolean {
+        val note = prefs[WidgetState.STALE_NOTE].orEmpty()
+        return note.isNotBlank() && note != REFRESHING
+    }
+
+    /** "2 min ago", "refreshing…", or "offline · 2 min ago" when the last try failed. */
+    private fun ageText(prefs: Preferences): String {
+        val note = prefs[WidgetState.STALE_NOTE].orEmpty()
+        if (note == REFRESHING) return note
+        val age = ageLabel(prefs[WidgetState.UPDATED_AT] ?: 0L)
+        return listOf(note, age).filter { it.isNotBlank() }.joinToString(" · ")
     }
 
     private fun ageLabel(updatedAt: Long): String {
         if (updatedAt == 0L) return ""
         val minutes = TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - updatedAt)
         return when {
-            minutes < 1 -> "now"
-            minutes < 60 -> "${minutes}m ago"
-            else -> "${minutes / 60}h ago"
+            minutes < 1 -> "just now"
+            minutes < 60 -> "$minutes min ago"
+            minutes < 60 * 24 -> "${minutes / 60} hr ago"
+            else -> "${minutes / (60 * 24)} d ago"
         }
+    }
+
+    companion object {
+        const val REFRESHING = "refreshing…"
     }
 }
 
@@ -219,11 +376,10 @@ class PlaneRefreshAction : ActionCallback {
     ) {
         // The fetch takes seconds and nothing on the tile moves until it lands,
         // so without this the button reads as broken and gets tapped again.
-        // The worker overwrites this note on both its success and failure paths,
-        // so it clears itself with no special handling here.
+        // The worker overwrites this note on both its success and failure paths.
         runCatching {
             updateAppWidgetState(context, glanceId) {
-                it[WidgetState.STALE_NOTE] = "refreshing…"
+                it[WidgetState.STALE_NOTE] = NearestPlaneWidget.REFRESHING
             }
             NearestPlaneWidget().update(context, glanceId)
         }
