@@ -25,6 +25,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -106,7 +109,10 @@ class MainActivity : ComponentActivity() {
         readSystemState()
         RefreshWorker.cancelPeriodic(this)
         WxRefreshWorker.schedulePeriodic(this)
-        setContent { MaterialTheme { Screen() } }
+        setContent {
+            // Follows the phone: dark screens in dark mode, light otherwise.
+            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) { Screen() }
+        }
     }
 
     private fun readSystemState() {

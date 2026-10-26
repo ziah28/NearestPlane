@@ -5,9 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.DashPathEffect
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -32,6 +33,7 @@ import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.background
+import androidx.glance.color.ColorProvider as DayNight
 import androidx.glance.currentState
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
@@ -66,15 +68,19 @@ class NearestPlaneWidget : GlanceAppWidget() {
         provideContent { Body(currentState()) }
     }
 
+    /**
+     * Every colour has a light and a dark value; the phone picks one from its
+     * own theme, so the tile switches the moment you change dark mode.
+     */
     private object Ink {
-        val card = Color(0xFFFFFFFF)
-        val ink = Color(0xFF0F1B2D)
-        val muted = Color(0xFF5A6472)
-        val rule = Color(0xFFE4E8EE)
-        val track = Color(0xFFB8C0CC)
-        val badge = Color(0xFFEEF1F6)
-        val accent = Color(0xFF2F6FED)
-        val warn = Color(0xFFB4400B)
+        val card = DayNight(day = Color(0xFFFFFFFF), night = Color(0xFF12161D))
+        val ink = DayNight(day = Color(0xFF0F1B2D), night = Color(0xFFEEF1F5))
+        val muted = DayNight(day = Color(0xFF5A6472), night = Color(0xFF98A1AE))
+        val rule = DayNight(day = Color(0xFFE4E8EE), night = Color(0xFF262C36))
+        val track = DayNight(day = Color(0xFFB8C0CC), night = Color(0xFF3A4250))
+        val badge = DayNight(day = Color(0xFFEEF1F6), night = Color(0xFF222833))
+        val accent = DayNight(day = Color(0xFF2F6FED), night = Color(0xFF8EC5FF))
+        val warn = DayNight(day = Color(0xFFB4400B), night = Color(0xFFFF8A4C))
     }
 
     private val codeWidth = 76
@@ -156,7 +162,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
                 text = stats,
                 maxLines = 1,
                 modifier = GlanceModifier.defaultWeight(),
-                style = TextStyle(fontSize = 12.sp, color = ColorProvider(Ink.muted))
+                style = TextStyle(fontSize = 12.sp, color = Ink.muted)
             )
             val eta = prefs[WidgetState.ETA].orEmpty()
             if (eta.isNotBlank()) {
@@ -164,7 +170,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
                 Text(
                     text = eta,
                     maxLines = 1,
-                    style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ColorProvider(Ink.ink))
+                    style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink.ink)
                 )
             }
         }
@@ -196,14 +202,14 @@ class NearestPlaneWidget : GlanceAppWidget() {
                 if (badge.isNotBlank()) {
                     Text(
                         text = badge,
-                        style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ColorProvider(Ink.ink))
+                        style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Ink.ink)
                     )
                 } else {
                     Image(
                         provider = ImageProvider(R.drawable.ic_plane),
                         contentDescription = null,
                         modifier = GlanceModifier.size(18.dp),
-                        colorFilter = ColorFilter.tint(ColorProvider(Ink.muted))
+                        colorFilter = ColorFilter.tint(Ink.muted)
                     )
                 }
             }
@@ -214,7 +220,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
                     Text(
                         text = sub,
                         maxLines = 1,
-                        style = TextStyle(fontSize = 12.sp, color = ColorProvider(Ink.muted))
+                        style = TextStyle(fontSize = 12.sp, color = Ink.muted)
                     )
                 }
             }
@@ -226,7 +232,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
                     style = TextStyle(
                         fontSize = 11.sp,
                         fontWeight = if (warn) FontWeight.Bold else FontWeight.Normal,
-                        color = ColorProvider(if (warn) Ink.warn else Ink.muted)
+                        color = if (warn) Ink.warn else Ink.muted
                     )
                 )
             }
@@ -242,7 +248,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
                         provider = ImageProvider(R.drawable.ic_refresh),
                         contentDescription = "Find the plane overhead",
                         modifier = GlanceModifier.size(18.dp),
-                        colorFilter = ColorFilter.tint(ColorProvider(Ink.muted))
+                        colorFilter = ColorFilter.tint(Ink.muted)
                     )
                 }
             }
@@ -261,12 +267,24 @@ class NearestPlaneWidget : GlanceAppWidget() {
                 City(fromCity, TextAlign.Start)
             }
             Spacer(GlanceModifier.width(gap.dp))
-            Image(
-                provider = ImageProvider(pathBitmap(context, pathWidth, progress)),
-                contentDescription = if (progress >= 0) "$progress% of the way from $from to $to" else "Route unknown",
-                contentScale = ContentScale.FillBounds,
-                modifier = GlanceModifier.size(pathWidth.dp, 24.dp)
-            )
+            // Two layers, each tinted by the theme: the grey track, then the
+            // flown line and plane in the accent colour on top.
+            Box(modifier = GlanceModifier.size(pathWidth.dp, 24.dp)) {
+                Image(
+                    provider = ImageProvider(pathBitmap(context, pathWidth, progress, PathLayer.TRACK)),
+                    contentDescription = null,
+                    contentScale = ContentScale.FillBounds,
+                    colorFilter = ColorFilter.tint(Ink.track),
+                    modifier = GlanceModifier.size(pathWidth.dp, 24.dp)
+                )
+                Image(
+                    provider = ImageProvider(pathBitmap(context, pathWidth, progress, PathLayer.FLOWN)),
+                    contentDescription = if (progress >= 0) "$progress% of the way from $from to $to" else "Route unknown",
+                    contentScale = ContentScale.FillBounds,
+                    colorFilter = ColorFilter.tint(Ink.accent),
+                    modifier = GlanceModifier.size(pathWidth.dp, 24.dp)
+                )
+            }
             Spacer(GlanceModifier.width(gap.dp))
             Column(
                 modifier = GlanceModifier.width(codeWidth.dp),
@@ -290,7 +308,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
      * own font instead, sized exactly to the text.
      */
     @Composable
-    private fun DisplayText(text: String, sizeSp: Float, color: Color, maxWidthDp: Float? = null) {
+    private fun DisplayText(text: String, sizeSp: Float, color: ColorProvider, maxWidthDp: Float? = null) {
         if (text.isBlank()) return
         val context = LocalContext.current
         val metrics = context.resources.displayMetrics
@@ -298,7 +316,8 @@ class NearestPlaneWidget : GlanceAppWidget() {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = displayFace(context)
             textSize = px
-            this.color = color.toArgb()
+            // Drawn white and tinted below, so the theme can recolour it.
+            this.color = android.graphics.Color.WHITE
         }
         val fm = paint.fontMetrics
         var w = kotlin.math.ceil(paint.measureText(text)).toInt().coerceAtLeast(1)
@@ -318,6 +337,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
             provider = ImageProvider(bmp),
             contentDescription = text,
             contentScale = ContentScale.FillBounds,
+            colorFilter = ColorFilter.tint(color),
             modifier = GlanceModifier.size((w / metrics.density).dp, (h / metrics.density).dp)
         )
     }
@@ -333,16 +353,18 @@ class NearestPlaneWidget : GlanceAppWidget() {
             text = city,
             maxLines = 1,
             modifier = GlanceModifier.fillMaxWidth(),
-            style = TextStyle(fontSize = 11.sp, color = ColorProvider(Ink.muted), textAlign = align)
+            style = TextStyle(fontSize = 11.sp, color = Ink.muted, textAlign = align)
         )
     }
 
+    private enum class PathLayer { TRACK, FLOWN }
+
     /**
      * Glance can't place one element over another at a percentage, so the path
-     * is drawn as a picture: dashed track, solid line behind the plane, plane
-     * at the flight's progress.
+     * is drawn as pictures, in white for the theme to tint: the dashed track
+     * with a gap where the plane sits, and the flown line with the plane.
      */
-    private fun pathBitmap(context: Context, widthDp: Float, progress: Int): Bitmap {
+    private fun pathBitmap(context: Context, widthDp: Float, progress: Int, layer: PathLayer): Bitmap {
         val d = context.resources.displayMetrics.density
         val w = (widthDp * d).toInt().coerceAtLeast(1)
         val h = (24 * d).toInt().coerceAtLeast(1)
@@ -353,32 +375,32 @@ class NearestPlaneWidget : GlanceAppWidget() {
         val known = progress >= 0
         val x = (if (known) w * progress.coerceIn(0, 100) / 100f else w / 2f)
             .coerceIn(planeSize / 2, w - planeSize / 2)
-
-        val track = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Ink.track.toArgb()
-            strokeWidth = 2 * d
-            style = Paint.Style.STROKE
-            pathEffect = DashPathEffect(floatArrayOf(5 * d, 4 * d), 0f)
-        }
-        canvas.drawLine(0f, cy, w.toFloat(), cy, track)
-
-        val done = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Ink.accent.toArgb()
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
             strokeWidth = 2 * d
             style = Paint.Style.STROKE
         }
-        if (known) canvas.drawLine(0f, cy, x, cy, done)
 
-        // A card-coloured gap behind the plane so the line doesn't run through it.
-        val gapPaint = Paint().apply { color = Ink.card.toArgb() }
-        canvas.drawRect(x - planeSize / 2 - 2 * d, 0f, x + planeSize / 2 + 2 * d, h.toFloat(), gapPaint)
-
-        ContextCompat.getDrawable(context, R.drawable.ic_plane)?.mutate()?.let { plane ->
-            plane.setTint(Ink.accent.toArgb())
-            val left = (x - planeSize / 2).toInt()
-            val top = ((h - planeSize) / 2).toInt()
-            plane.setBounds(left, top, left + planeSize.toInt(), top + planeSize.toInt())
-            plane.draw(canvas)
+        when (layer) {
+            PathLayer.TRACK -> {
+                line.pathEffect = DashPathEffect(floatArrayOf(5 * d, 4 * d), 0f)
+                canvas.drawLine(0f, cy, w.toFloat(), cy, line)
+                // Behind the flown line the track is hidden anyway; around the
+                // plane it's cut away so the plane sits in a clean gap.
+                val clear = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR) }
+                if (known) canvas.drawRect(0f, 0f, x, h.toFloat(), clear)
+                canvas.drawRect(x - planeSize / 2 - 2 * d, 0f, x + planeSize / 2 + 2 * d, h.toFloat(), clear)
+            }
+            PathLayer.FLOWN -> {
+                if (known) canvas.drawLine(0f, cy, x - planeSize / 2 - 2 * d, cy, line)
+                ContextCompat.getDrawable(context, R.drawable.ic_plane)?.mutate()?.let { plane ->
+                    plane.setTint(android.graphics.Color.WHITE)
+                    val left = (x - planeSize / 2).toInt()
+                    val top = ((h - planeSize) / 2).toInt()
+                    plane.setBounds(left, top, left + planeSize.toInt(), top + planeSize.toInt())
+                    plane.draw(canvas)
+                }
+            }
         }
         return bmp
     }
