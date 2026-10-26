@@ -67,9 +67,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         readSystemState()
-        // Re-assert the schedule every time the app is opened. If the system
-        // dropped the periodic jobs, this puts them back.
-        RefreshWorker.schedulePeriodic(this)
+        // Planes refresh only from the widget's button; weather keeps its schedule.
+        RefreshWorker.cancelPeriodic(this)
         WxRefreshWorker.schedulePeriodic(this)
         catchUpToWhereYouAre()
     }
@@ -95,8 +94,8 @@ class MainActivity : ComponentActivity() {
             // Our own saved fix is what we'd be comparing against; it tells
             // us nothing new about where you are.
             if (now.source == PositionSource.CACHED) return@launch
+            // Weather only: the plane tile keeps the last plane until you tap refresh.
             if (movedFar(before, now.lat, now.lon)) {
-                RefreshWorker.refreshNow(context)
                 WxRefreshWorker.refreshNow(context)
             }
         }
@@ -105,7 +104,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         readSystemState()
-        RefreshWorker.schedulePeriodic(this)
+        RefreshWorker.cancelPeriodic(this)
         WxRefreshWorker.schedulePeriodic(this)
         setContent { MaterialTheme { Screen() } }
     }

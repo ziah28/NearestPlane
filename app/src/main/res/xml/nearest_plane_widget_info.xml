@@ -1,14 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  updatePeriodMillis is the AlarmManager-driven backup path, and 1800000 (30
-  minutes) is the floor. Anything smaller is silently rounded up by the system,
-  so lowering this number does nothing at all — it just makes the file lie.
-
-  That means the backup fires at half the rate of the 15-minute WorkManager
-  job it backs up. It is a safety net for the case where WorkManager is being
-  deferred entirely, not a second opinion on every refresh. To genuinely
-  refresh more often, change the interval in RefreshWorker.schedulePeriodic and accept that
-  15 minutes is that API's own floor.
+  updatePeriodMillis 0: the system never refreshes this widget on a timer.
+  It changes only when you tap its refresh button.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_description"
@@ -20,5 +13,5 @@
     android:targetCellWidth="4"
     android:targetCellHeight="2"
     android:resizeMode="horizontal|vertical"
-    android:updatePeriodMillis="1800000"
+    android:updatePeriodMillis="0"
     android:widgetCategory="home_screen" />

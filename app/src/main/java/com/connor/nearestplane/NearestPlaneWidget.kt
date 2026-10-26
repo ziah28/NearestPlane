@@ -347,8 +347,13 @@ class NearestPlaneWidget : GlanceAppWidget() {
     private fun ageText(prefs: Preferences): String {
         val note = prefs[WidgetState.STALE_NOTE].orEmpty()
         if (note == REFRESHING) return note
+        val label = when (note) {
+            "offline" -> "No signal"
+            "no position" -> "No location"
+            else -> note
+        }
         val age = ageLabel(prefs[WidgetState.UPDATED_AT] ?: 0L)
-        return listOf(note, age).filter { it.isNotBlank() }.joinToString(" · ")
+        return listOf(label, age).filter { it.isNotBlank() }.joinToString(" · ")
     }
 
     private fun ageLabel(updatedAt: Long): String {

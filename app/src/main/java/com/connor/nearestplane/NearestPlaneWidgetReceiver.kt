@@ -11,17 +11,13 @@ class NearestPlaneWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
-        RefreshWorker.schedulePeriodic(context)
-        RefreshWorker.refreshNow(context)
+        // Nothing fetched until you tap refresh; just clear any old schedule.
+        RefreshWorker.cancelPeriodic(context)
     }
 
     /**
-     * Second, independent refresh path.
-     *
-     * updatePeriodMillis in the widget XML drives this through the system's
-     * AlarmManager, which survives some conditions that defer WorkManager jobs.
-     * Belt and braces: whichever fires first wins, and the unique-work policy
-     * means a double fire costs one request, not two.
+     * Called when the widget is placed or the system asks it to redraw. It
+     * redraws from saved state only: the plane changes when you tap refresh.
      */
     override fun onUpdate(
         context: Context,
@@ -29,7 +25,6 @@ class NearestPlaneWidgetReceiver : GlanceAppWidgetReceiver() {
         appWidgetIds: IntArray
     ) {
         super.onUpdate(context, appWidgetManager, appWidgetIds)
-        RefreshWorker.schedulePeriodic(context)
-        RefreshWorker.refreshNow(context)
+        RefreshWorker.cancelPeriodic(context)
     }
 }

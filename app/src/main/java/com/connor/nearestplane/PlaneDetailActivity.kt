@@ -44,9 +44,6 @@ class PlaneDetailActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Tapping the tile opens this screen; refresh the tile behind it too,
-        // so tap-to-refresh still does what it always did.
-        RefreshWorker.refreshNow(this)
         setContent { MaterialTheme { Screen() } }
     }
 

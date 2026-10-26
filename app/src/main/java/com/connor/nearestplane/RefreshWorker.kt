@@ -45,7 +45,8 @@ class RefreshWorker(
     }
 
     private suspend fun refresh(context: Context): Result {
-        val fix = LocationSource.current(context)
+        // Every plane refresh is now one you asked for, so it gets a fresh fix.
+        val fix = LocationSource.current(context, fresh = true)
         if (fix == null) {
             degrade(context, "no position")
             Diagnostics.noteError(context, "plane", "No position available")
@@ -202,6 +203,15 @@ class RefreshWorker(
                 ExistingPeriodicWorkPolicy.UPDATE,
                 request
             )
+        }
+
+        /**
+         * Overhead refreshes only when you tap the button, so any periodic job
+         * an earlier build scheduled is removed. schedulePeriodic stays for
+         * reference but nothing calls it.
+         */
+        fun cancelPeriodic(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_NAME)
         }
 
         fun refreshNow(context: Context) {

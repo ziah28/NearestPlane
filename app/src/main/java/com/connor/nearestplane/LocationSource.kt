@@ -120,11 +120,11 @@ object LocationSource {
      * The position to work from: a pinned place if there is one, otherwise the
      * device's own, through a three-tier fallback.
      */
-    suspend fun current(context: Context): Position? {
+    suspend fun current(context: Context, fresh: Boolean = false): Position? {
         AppSettings.fixedLocation(context)?.let {
             return Position(it.lat, it.lon, PositionSource.FIXED, null)
         }
-        return deviceFix(context)
+        return deviceFix(context, fresh)
     }
 
     /**
@@ -144,14 +144,16 @@ object LocationSource {
      * from something old rather than presenting it as a live reading.
      */
     @SuppressLint("MissingPermission")
-    suspend fun deviceFix(context: Context): Position? {
+    suspend fun deviceFix(context: Context, fresh: Boolean = false): Position? {
         if (!hasPermission(context)) return null
         val client = LocationServices.getFusedLocationProviderClient(context)
 
+        // Fresh: the refresh button. You tapped it because something is overhead
+        // right now, wherever you are, so a fix from ten minutes ago won't do.
         val request = CurrentLocationRequest.Builder()
-            .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
-            .setMaxUpdateAgeMillis(10 * 60 * 1000L)
-            .setDurationMillis(10_000L)
+            .setPriority(if (fresh) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+            .setMaxUpdateAgeMillis(if (fresh) 30_000L else 10 * 60 * 1000L)
+            .setDurationMillis(if (fresh) 15_000L else 10_000L)
             .build()
 
         await { client.getCurrentLocation(request, null) }?.let {
