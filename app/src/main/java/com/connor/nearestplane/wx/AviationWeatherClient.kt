@@ -141,6 +141,21 @@ object AviationWeatherClient {
         )
     }
 
+    /**
+     * The latest report for each of [stationIds] (ICAO codes), in one request.
+     * Used for the weather at both ends of a flight on the Overhead widget.
+     */
+    suspend fun metars(stationIds: List<String>): Map<String, Metar> = withContext(Dispatchers.IO) {
+        val ids = stationIds.map { it.trim().uppercase() }.filter { it.matches(Regex("[A-Z0-9]{3,4}")) }.distinct()
+        if (ids.isEmpty()) return@withContext emptyMap()
+        val arr = JSONArray(get("$BASE/metar?ids=${ids.joinToString(",")}&format=json"))
+        (0 until arr.length())
+            .mapNotNull { arr.optJSONObject(it) }
+            .mapNotNull { parseMetar(it, 0.0, 0.0) }
+            .groupBy { it.stationId.uppercase() }
+            .mapValues { (_, reports) -> reports.maxByOrNull { it.observedEpoch ?: 0L }!! }
+    }
+
     suspend fun taf(stationId: String): Taf? = withContext(Dispatchers.IO) {
         val body = get("$BASE/taf?ids=$stationId&format=json")
         val arr = JSONArray(body)

@@ -102,6 +102,8 @@ class RefreshWorker(
                 it[WidgetState.ETA] = ""
                 it[WidgetState.LOGO] = ""
                 it[WidgetState.HEX] = ""
+                it[WidgetState.FROM_WX] = ""
+                it[WidgetState.TO_WX] = ""
                 it[WidgetState.DEP_TIME] = ""
                 it[WidgetState.ARR_TIME] = ""
             }
@@ -166,6 +168,12 @@ class RefreshWorker(
                 ?.let { code -> if (runCatching { AirlineLogos.ensure(context, code) }.getOrDefault(false)) code else "" }
                 .orEmpty()
             val pass = BoardingPass.from(plane, report)
+            // Free and keyless; a missing report just leaves that line off.
+            val origin = report.route?.origin
+            val dest = report.route?.destination
+            val wx = runCatching { AirportWeather.forAirports(context, origin, dest) }.getOrDefault(emptyMap())
+            val fromWx = origin?.let { wx[it.icao.uppercase()] }
+            val toWx = dest?.let { wx[it.icao.uppercase()] }
 
             writeTiles(context) { p ->
                 p[WidgetState.STATUS] = "ok"
@@ -191,6 +199,10 @@ class RefreshWorker(
                 p[WidgetState.PROGRESS] = pass.progress
                 p[WidgetState.ETA] = pass.eta
                 p[WidgetState.LOGO] = logo
+                p[WidgetState.FROM_WX] = fromWx?.temp.orEmpty()
+                p[WidgetState.FROM_WX_ICON] = fromWx?.icon?.name.orEmpty()
+                p[WidgetState.TO_WX] = toWx?.temp.orEmpty()
+                p[WidgetState.TO_WX_ICON] = toWx?.icon?.name.orEmpty()
                 writeTime(p, times?.departure, WidgetState.DEP_TIME, WidgetState.DEP_SCHED, WidgetState.DEP_PILL, WidgetState.DEP_LATE, WidgetState.DEP_DONE)
                 writeTime(p, times?.arrival, WidgetState.ARR_TIME, WidgetState.ARR_SCHED, WidgetState.ARR_PILL, WidgetState.ARR_LATE, WidgetState.ARR_DONE)
             }

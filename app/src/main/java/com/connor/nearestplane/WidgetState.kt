@@ -45,6 +45,11 @@ object WidgetState {
     val ARR_PILL = stringPreferencesKey("arr_pill")
     val ARR_LATE = intPreferencesKey("arr_late")
     val ARR_DONE = booleanPreferencesKey("arr_done")
+    // Weather at each end: "11°C" and a WxIcon name, blank when the airport has no report.
+    val FROM_WX = stringPreferencesKey("from_wx")
+    val FROM_WX_ICON = stringPreferencesKey("from_wx_icon")
+    val TO_WX = stringPreferencesKey("to_wx")
+    val TO_WX_ICON = stringPreferencesKey("to_wx_icon")
     val HEX = stringPreferencesKey("hex")                // the plane on the tile, for the detail screen
     val LOGO = stringPreferencesKey("logo")              // "U2" when that logo is saved on the phone
 }

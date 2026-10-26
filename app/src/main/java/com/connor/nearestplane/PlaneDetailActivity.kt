@@ -61,7 +61,7 @@ class PlaneDetailActivity : ComponentActivity() {
 
     private sealed interface State {
         data object Loading : State
-        data class Shown(val report: PlaneReport, val positionNote: String?) : State
+        data class Shown(val report: PlaneReport, val positionNote: String?, val wx: Map<String, AirportWx> = emptyMap()) : State
         data class Gone(val label: String) : State
         data class Problem(val message: String) : State
     }
@@ -113,7 +113,10 @@ class PlaneDetailActivity : ComponentActivity() {
                 hex = plane.hex
                 // The saved AeroDataBox answer, if any, so this matches the widget without a lookup.
                 val report = FlightTimes.merge(PlaneSummary.build(ctx, plane), FlightTimes.cached(ctx, plane))
-                state = State.Shown(report, fix.staleNote)
+                val wx = runCatching {
+                    AirportWeather.forAirports(ctx, report.route?.origin, report.route?.destination)
+                }.getOrDefault(emptyMap())
+                state = State.Shown(report, fix.staleNote, wx)
                 updatedAt = System.currentTimeMillis()
                 // Refreshing here updates the widget too, so the two never disagree.
                 if (byYou) RefreshWorker.showPlane(ctx, plane, report, fix)
@@ -159,14 +162,14 @@ class PlaneDetailActivity : ComponentActivity() {
                             style = body(14.sp), color = p.muted
                         )
                     }
-                    is State.Shown -> Shown(s.report, s.positionNote)
+                    is State.Shown -> Shown(s.report, s.positionNote, s.wx)
                 }
             }
         }
     }
 
     @Composable
-    private fun Shown(r: PlaneReport, positionNote: String?) {
+    private fun Shown(r: PlaneReport, positionNote: String?, wx: Map<String, AirportWx>) {
         val p = LocalPalette.current
         val plane = r.plane
         val pass = BoardingPass.from(plane, r)
@@ -210,11 +213,13 @@ class PlaneDetailActivity : ComponentActivity() {
                 Column {
                     Text(pass.fromCode.ifBlank { "-" }, style = display(40.sp), color = p.ink)
                     Text(pass.fromCity.ifBlank { "-" }, style = body(12.sp), color = p.muted)
+                    r.route?.origin?.let { wx[it.icao.uppercase()] }?.let { WeatherLine(it) }
                 }
                 RoutePath(pass.progress, modifier = Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.End) {
                     Text(pass.toCode.ifBlank { "-" }, style = display(40.sp), color = p.ink)
                     Text(pass.toCity.ifBlank { "-" }, style = body(12.sp), color = p.muted)
+                    r.route?.destination?.let { wx[it.icao.uppercase()] }?.let { WeatherLine(it) }
                 }
             }
 
@@ -279,7 +284,7 @@ class PlaneDetailActivity : ComponentActivity() {
         }
 
         Text(
-            "Position from adsb.fi · aircraft and route from adsbdb · times by AeroDataBox",
+            "Position from adsb.fi · aircraft and route from adsbdb · times by AeroDataBox · weather from aviationweather.gov",
             style = body(11.sp), color = p.muted, modifier = Modifier.padding(horizontal = 4.dp)
         )
     }
@@ -396,6 +401,23 @@ class PlaneDetailActivity : ComponentActivity() {
                     if (row.size == 1) Box(Modifier.weight(1f))
                 }
             }
+        }
+    }
+
+    @Composable
+    private fun WeatherLine(w: AirportWx) {
+        val p = LocalPalette.current
+        Row(
+            modifier = Modifier.padding(top = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Image(
+                painterResource(w.icon.drawable), contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                colorFilter = ColorFilter.tint(if (w.icon == WxIcon.SUN || w.icon == WxIcon.PARTLY) p.late else p.muted)
+            )
+            Text(w.temp, style = body(12.sp, FontWeight.SemiBold), color = p.ink)
         }
     }
 

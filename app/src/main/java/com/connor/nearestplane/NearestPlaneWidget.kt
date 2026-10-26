@@ -160,7 +160,9 @@ class NearestPlaneWidget : GlanceAppWidget() {
             fromCity = prefs[WidgetState.FROM_CITY].orEmpty().ifBlank { UNKNOWN },
             to = prefs[WidgetState.TO_CODE].orEmpty().ifBlank { UNKNOWN },
             toCity = prefs[WidgetState.TO_CITY].orEmpty().ifBlank { UNKNOWN },
-            progress = progress
+            progress = progress,
+            fromWx = prefs[WidgetState.FROM_WX].orEmpty() to prefs[WidgetState.FROM_WX_ICON].orEmpty(),
+            toWx = prefs[WidgetState.TO_WX].orEmpty() to prefs[WidgetState.TO_WX_ICON].orEmpty()
         )
 
         Gap()
@@ -335,7 +337,15 @@ class NearestPlaneWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun Route(from: String, fromCity: String, to: String, toCity: String, progress: Int) {
+    private fun Route(
+        from: String,
+        fromCity: String,
+        to: String,
+        toCity: String,
+        progress: Int,
+        fromWx: Pair<String, String> = "" to "",
+        toWx: Pair<String, String> = "" to ""
+    ) {
         val context = LocalContext.current
         val tileWidth = LocalSize.current.width.value
         val pathWidth = (tileWidth - sidePad * 2 - codeWidth * 2 - gap * 2).coerceAtLeast(40f)
@@ -344,6 +354,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
             Column(modifier = GlanceModifier.width(codeWidth.dp)) {
                 Code(from, TextAlign.Start)
                 City(fromCity, TextAlign.Start)
+                Weather(fromWx)
             }
             Spacer(GlanceModifier.width(gap.dp))
             // Two layers, each tinted by the theme: the grey track, then the
@@ -371,6 +382,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
             ) {
                 Code(to, TextAlign.End)
                 City(toCity, TextAlign.End)
+                Weather(toWx)
             }
         }
     }
@@ -424,6 +436,27 @@ class NearestPlaneWidget : GlanceAppWidget() {
     private fun displayFace(context: Context): android.graphics.Typeface =
         face ?: (runCatching { ResourcesCompat.getFont(context, R.font.space_grotesk_bold) }.getOrNull()
             ?: android.graphics.Typeface.DEFAULT_BOLD).also { face = it }
+
+    /** "☁ 11°C" under a city: the airport's own weather report. Absent when it has none. */
+    @Composable
+    private fun Weather(wx: Pair<String, String>) {
+        val (temp, iconName) = wx
+        if (temp.isBlank()) return
+        val icon = runCatching { WxIcon.valueOf(iconName) }.getOrNull()
+        Spacer(GlanceModifier.height(6.dp))
+        Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+            if (icon != null) {
+                Image(
+                    provider = ImageProvider(icon.drawable),
+                    contentDescription = null,
+                    modifier = GlanceModifier.size(13.dp),
+                    colorFilter = ColorFilter.tint(if (icon == WxIcon.SUN || icon == WxIcon.PARTLY) Ink.late else Ink.muted)
+                )
+                Spacer(GlanceModifier.width(4.dp))
+            }
+            Text(text = temp, style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Ink.ink))
+        }
+    }
 
     @Composable
     private fun City(city: String, align: TextAlign) {
