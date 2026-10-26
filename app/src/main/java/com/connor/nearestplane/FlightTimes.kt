@@ -39,7 +39,23 @@ data class FlightTime(
         }
 }
 
-data class FlightSchedule(val departure: FlightTime?, val arrival: FlightTime?)
+/**
+ * Everything one AeroDataBox lookup says about a flight. Looked up by the
+ * aircraft's own transponder ID, so the route is today's, not a guess from the
+ * callsign; any part it doesn't have stays null and the free sources fill in.
+ */
+data class FlightSchedule(
+    val departure: FlightTime?,
+    val arrival: FlightTime?,
+    val origin: Airport? = null,
+    val destination: Airport? = null,
+    val airlineName: String? = null,
+    val airlineIata: String? = null,
+    /** "FR 4527", what you'd see on a departures board. */
+    val flightNumber: String? = null,
+    val model: String? = null,
+    val registration: String? = null
+)
 
 /**
  * Departure and arrival times from AeroDataBox (via RapidAPI), with your key.
@@ -72,7 +88,17 @@ object FlightTimes {
         return runCatching {
             val o = JSONObject(raw)
             if (System.currentTimeMillis() - o.optLong("at") > TTL_MS) return null
-            FlightSchedule(readTime(o.optJSONObject("dep")), readTime(o.optJSONObject("arr")))
+            FlightSchedule(
+                departure = readTime(o.optJSONObject("dep")),
+                arrival = readTime(o.optJSONObject("arr")),
+                origin = readAirport(o.optJSONObject("orig")),
+                destination = readAirport(o.optJSONObject("dest")),
+                airlineName = o.optString("aname").ifBlank { null },
+                airlineIata = o.optString("aiata").ifBlank { null },
+                flightNumber = o.optString("fno").ifBlank { null },
+                model = o.optString("model").ifBlank { null },
+                registration = o.optString("reg").ifBlank { null }
+            )
         }.getOrNull()
     }
 
@@ -104,6 +130,13 @@ object FlightTimes {
         val saved = JSONObject().put("at", System.currentTimeMillis())
         schedule?.departure?.let { saved.put("dep", writeTime(it)) }
         schedule?.arrival?.let { saved.put("arr", writeTime(it)) }
+        schedule?.origin?.let { saved.put("orig", writeAirport(it)) }
+        schedule?.destination?.let { saved.put("dest", writeAirport(it)) }
+        schedule?.airlineName?.let { saved.put("aname", it) }
+        schedule?.airlineIata?.let { saved.put("aiata", it) }
+        schedule?.flightNumber?.let { saved.put("fno", it) }
+        schedule?.model?.let { saved.put("model", it) }
+        schedule?.registration?.let { saved.put("reg", it) }
         prefs(context).edit().putString(cacheKey(plane), saved.toString()).apply()
         trimCache(context)
         return schedule
@@ -206,10 +239,19 @@ object FlightTimes {
             kotlin.math.abs(s - now)
         } ?: return null
 
+        val airline = chosen.optJSONObject("airline")
+        val aircraft = chosen.optJSONObject("aircraft")
         return FlightSchedule(
             departure = end(chosen.optJSONObject("departure"), arriving = false),
-            arrival = end(chosen.optJSONObject("arrival"), arriving = true)
-        ).takeIf { it.departure != null || it.arrival != null }
+            arrival = end(chosen.optJSONObject("arrival"), arriving = true),
+            origin = airport(chosen.optJSONObject("departure")?.optJSONObject("airport")),
+            destination = airport(chosen.optJSONObject("arrival")?.optJSONObject("airport")),
+            airlineName = airline?.optString("name")?.ifBlank { null },
+            airlineIata = airline?.optString("iata")?.ifBlank { null },
+            flightNumber = chosen.optString("number").ifBlank { null },
+            model = aircraft?.optString("model")?.ifBlank { null },
+            registration = aircraft?.optString("reg")?.ifBlank { null }
+        ).takeIf { it.departure != null || it.arrival != null || (it.origin != null && it.destination != null) }
     }
 
     private fun end(o: JSONObject?, arriving: Boolean): FlightTime? {
@@ -247,6 +289,69 @@ object FlightTimes {
             clear()
             set(y.toInt(), mo.toInt() - 1, d.toInt(), h.toInt(), mi.toInt(), 0)
         }.timeInMillis
+    }
+
+    /** An airport from AeroDataBox; only usable with a position, which the route path needs. */
+    private fun airport(o: JSONObject?): Airport? {
+        if (o == null) return null
+        val loc = o.optJSONObject("location") ?: return null
+        val lat = (loc.opt("lat") as? Number)?.toDouble() ?: return null
+        val lon = (loc.opt("lon") as? Number)?.toDouble() ?: return null
+        val icao = o.optString("icao").ifBlank { return null }
+        return Airport(
+            icao = icao,
+            iata = o.optString("iata").ifBlank { null },
+            municipality = o.optString("municipalityName").ifBlank { o.optString("shortName").ifBlank { null } },
+            lat = lat,
+            lon = lon
+        )
+    }
+
+    private fun writeAirport(a: Airport) = JSONObject()
+        .put("icao", a.icao).put("iata", a.iata.orEmpty()).put("city", a.municipality.orEmpty())
+        .put("lat", a.lat).put("lon", a.lon)
+
+    private fun readAirport(o: JSONObject?): Airport? {
+        if (o == null || !o.has("lat") || !o.has("lon")) return null
+        return Airport(
+            icao = o.optString("icao").ifBlank { return null },
+            iata = o.optString("iata").ifBlank { null },
+            municipality = o.optString("city").ifBlank { null },
+            lat = o.optDouble("lat"),
+            lon = o.optDouble("lon")
+        )
+    }
+
+    /**
+     * The free sources' report, with AeroDataBox's answer laid over it: its
+     * route, airline and aircraft win wherever it has them, because they come
+     * from today's flight rather than a callsign table.
+     */
+    fun merge(report: PlaneReport, s: FlightSchedule?): PlaneReport {
+        if (s == null) return report
+        var r = report
+        if (s.origin != null && s.destination != null) {
+            val route = FlightRoute(
+                airline = s.airlineName ?: report.route?.airline,
+                origin = s.origin,
+                destination = s.destination,
+                airlineIata = s.airlineIata ?: report.route?.airlineIata
+            )
+            r = r.copy(
+                route = route,
+                quality = RouteQuality.GOOD,
+                routeLine = runCatching { PlaneSummary.routeLine(route, RouteQuality.GOOD) }.getOrDefault(r.routeLine),
+                timingLine = runCatching { PlaneSummary.timingLine(report.plane, route) }.getOrDefault("")
+            )
+        } else if (s.airlineIata != null && r.route != null) {
+            r = r.copy(route = r.route!!.copy(airlineIata = s.airlineIata))
+        }
+        s.airlineName?.let { r = r.copy(operator = it) }
+        s.model?.let { r = r.copy(typeName = it) }
+        s.registration?.let { reg ->
+            r = r.copy(info = r.info?.copy(registration = reg) ?: AircraftInfo(null, null, null, reg, null))
+        }
+        return r
     }
 
     private fun writeTime(t: FlightTime) = JSONObject()

@@ -111,7 +111,8 @@ class PlaneDetailActivity : ComponentActivity() {
                     return
                 }
                 hex = plane.hex
-                val report = PlaneSummary.build(ctx, plane)
+                // The saved AeroDataBox answer, if any, so this matches the widget without a lookup.
+                val report = FlightTimes.merge(PlaneSummary.build(ctx, plane), FlightTimes.cached(ctx, plane))
                 state = State.Shown(report, fix.staleNote)
                 updatedAt = System.currentTimeMillis()
                 // Refreshing here updates the widget too, so the two never disagree.
@@ -193,6 +194,9 @@ class PlaneDetailActivity : ComponentActivity() {
                     Text(plane.label, style = display(24.sp), color = p.ink)
                     val sub = listOf(r.operator, r.typeName.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ")
                     if (sub.isNotBlank()) Text(sub, style = body(13.sp), color = p.muted)
+                    FlightTimes.cached(this@PlaneDetailActivity, plane)?.flightNumber?.let {
+                        Text("Flight $it", style = body(13.sp, FontWeight.Medium), color = p.ink)
+                    }
                 }
             }
             plane.emergency?.let {

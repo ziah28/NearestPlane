@@ -156,14 +156,16 @@ class RefreshWorker(
          * Puts a plane on every placed tile. The refresh button and the detail
          * screen's refresh both come through here, so the two never disagree.
          */
-        internal suspend fun showPlane(context: Context, plane: Aircraft, report: PlaneReport, fix: Position) {
+        internal suspend fun showPlane(context: Context, plane: Aircraft, freeReport: PlaneReport, fix: Position) {
+            // Saved answers cost nothing; a new flight costs one lookup. Never fails the tile.
+            val times = runCatching { FlightTimes.forPlane(context, plane) }.getOrNull()
+            // AeroDataBox's route, airline and aircraft win wherever it has them.
+            val report = FlightTimes.merge(freeReport, times)
             // A missing logo never costs the tile: no logo just means the code badge.
             val logo = report.route?.airlineIata
                 ?.let { code -> if (runCatching { AirlineLogos.ensure(context, code) }.getOrDefault(false)) code else "" }
                 .orEmpty()
             val pass = BoardingPass.from(plane, report)
-            // Saved times cost nothing; a new flight costs one lookup. Never fails the tile.
-            val times = runCatching { FlightTimes.forPlane(context, plane) }.getOrNull()
 
             writeTiles(context) { p ->
                 p[WidgetState.STATUS] = "ok"
