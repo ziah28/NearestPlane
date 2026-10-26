@@ -272,6 +272,27 @@ object AppSettings {
         context.stationStore.edit { it.clear() }
     }
 
+    // ---- AeroDataBox key for flight times ----
+    //
+    // Kept in the same file as the station token, which the backup rules
+    // already leave out: a key is a credential and stays on this phone.
+
+    private val TIMES_KEY = stringPreferencesKey("aerodatabox_key")
+
+    suspend fun timesKey(context: Context): String? =
+        runCatching { context.stationStore.data.first()[TIMES_KEY]?.takeIf { it.isNotBlank() } }.getOrNull()
+
+    fun timesKeyFlow(context: Context): Flow<String?> =
+        context.stationStore.data.map { it[TIMES_KEY]?.takeIf { k -> k.isNotBlank() } }
+
+    suspend fun setTimesKey(context: Context, key: String) {
+        context.stationStore.edit { it[TIMES_KEY] = key.trim() }
+    }
+
+    suspend fun clearTimesKey(context: Context) {
+        context.stationStore.edit { it.remove(TIMES_KEY) }
+    }
+
     // ---- last known position, so a failed GPS read never blanks a widget ----
 
     private val LAST_LAT = doublePreferencesKey("last_lat")

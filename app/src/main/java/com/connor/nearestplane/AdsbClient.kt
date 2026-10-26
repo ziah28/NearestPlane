@@ -112,6 +112,43 @@ object AdsbClient {
         throw failure ?: IllegalStateException("No ADS-B endpoint configured")
     }
 
+    private val HEX_ENDPOINTS = listOf(
+        "https://opendata.adsb.fi/api/v2/hex/%s",
+        "https://api.adsb.lol/v2/hex/%s"
+    )
+
+    /**
+     * One aircraft by its Mode-S hex, measured from where you are: how the
+     * detail screen follows the plane on the widget rather than whatever is
+     * nearest now. Null when it isn't broadcasting any more.
+     */
+    suspend fun byHex(hex: String, fromLat: Double, fromLon: Double): Aircraft? = withContext(Dispatchers.IO) {
+        val clean = hex.trim().lowercase(Locale.US).filter { it.isLetterOrDigit() }
+        if (clean.isEmpty()) return@withContext null
+        var failure: Exception? = null
+        for (endpoint in HEX_ENDPOINTS) {
+            try {
+                val root = JSONObject(get(endpoint.format(Locale.US, clean)))
+                val list = root.optJSONArray("ac") ?: root.optJSONArray("aircraft")
+                    ?: return@withContext null
+                val o = (0 until list.length()).mapNotNull { list.optJSONObject(it) }
+                    .firstOrNull { it.optString("hex", "").trim().lowercase(Locale.US) == clean }
+                    ?: return@withContext null
+                // The hex lookup has no "distance from you", so work it out.
+                val a = parseAircraft(o)
+                val lat = a.lat
+                val lon = a.lon
+                return@withContext if (lat == null || lon == null) a else a.copy(
+                    distanceNm = RouteMath.nmBetween(fromLat, fromLon, lat, lon),
+                    bearingDeg = RouteMath.bearingTo(fromLat, fromLon, lat, lon)
+                )
+            } catch (e: Exception) {
+                failure = e
+            }
+        }
+        throw failure ?: IllegalStateException("No ADS-B endpoint configured")
+    }
+
     private fun get(address: String, token: String? = null): String {
         val url = URL(address)
         return (url.openConnection() as HttpURLConnection).run {
@@ -206,7 +243,8 @@ object AdsbClient {
             bearingDeg = o.optDoubleOrNull("dir"),
             lat = o.optDoubleOrNull("lat"),
             lon = o.optDoubleOrNull("lon"),
-            squawk = o.optString("squawk", "").trim().ifBlank { null }
+            squawk = o.optString("squawk", "").trim().ifBlank { null },
+            verticalRateFpm = ((o.opt("baro_rate") ?: o.opt("geom_rate")) as? Number)?.toInt()
         )
     }
 

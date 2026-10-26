@@ -101,6 +101,7 @@ class RefreshWorker(
                 it[WidgetState.PROGRESS] = -1
                 it[WidgetState.ETA] = ""
                 it[WidgetState.LOGO] = ""
+                it[WidgetState.HEX] = ""
             }
             Diagnostics.noteOk(context, "plane")
             return Result.success()
@@ -110,37 +111,7 @@ class RefreshWorker(
         val report = PlaneSummary.build(context, plane)
         report.enrichError?.let { Diagnostics.noteError(context, "plane", "enrich: $it") }
 
-        // A missing logo never costs the tile: no logo just means the code badge.
-        val logo = report.route?.airlineIata
-            ?.let { code -> runCatching { AirlineLogos.ensure(context, code) }.getOrDefault(false).let { if (it) code else "" } }
-            .orEmpty()
-
-        write(context) { p ->
-            p[WidgetState.STATUS] = "ok"
-            p[WidgetState.TITLE] = plane.label
-            p[WidgetState.AIRLINE] = report.operator
-            p[WidgetState.TYPE_NAME] = report.typeName.orEmpty()
-            p[WidgetState.ROUTE] = report.routeLine
-            p[WidgetState.TIMING] = report.timingLine
-            p[WidgetState.POSITION] = plane.positionLine
-            p[WidgetState.DETAIL] = plane.detail
-            p[WidgetState.EMERGENCY] = plane.emergency.orEmpty()
-            // An old position is worth saying out loud: the distance and bearing
-            // are measured from it, and nothing else on the tile hints at that.
-            p[WidgetState.STALE_NOTE] = fix.staleNote.orEmpty()
-            p[WidgetState.PINNED] = fix.source == PositionSource.FIXED
-            p[WidgetState.UPDATED_AT] = System.currentTimeMillis()
-
-            val pass = BoardingPass.from(plane, report)
-            p[WidgetState.BADGE] = pass.badge
-            p[WidgetState.FROM_CODE] = pass.fromCode
-            p[WidgetState.FROM_CITY] = pass.fromCity
-            p[WidgetState.TO_CODE] = pass.toCode
-            p[WidgetState.TO_CITY] = pass.toCity
-            p[WidgetState.PROGRESS] = pass.progress
-            p[WidgetState.ETA] = pass.eta
-            p[WidgetState.LOGO] = logo
-        }
+        showPlane(context, plane, report, fix)
         Diagnostics.noteOk(context, "plane")
         return Result.success()
     }
@@ -178,6 +149,56 @@ class RefreshWorker(
     }
 
     companion object {
+
+        /**
+         * Puts a plane on every placed tile. The refresh button and the detail
+         * screen's refresh both come through here, so the two never disagree.
+         */
+        internal suspend fun showPlane(context: Context, plane: Aircraft, report: PlaneReport, fix: Position) {
+            // A missing logo never costs the tile: no logo just means the code badge.
+            val logo = report.route?.airlineIata
+                ?.let { code -> if (runCatching { AirlineLogos.ensure(context, code) }.getOrDefault(false)) code else "" }
+                .orEmpty()
+            val pass = BoardingPass.from(plane, report)
+
+            writeTiles(context) { p ->
+                p[WidgetState.STATUS] = "ok"
+                p[WidgetState.TITLE] = plane.label
+                p[WidgetState.AIRLINE] = report.operator
+                p[WidgetState.TYPE_NAME] = report.typeName.orEmpty()
+                p[WidgetState.ROUTE] = report.routeLine
+                p[WidgetState.TIMING] = report.timingLine
+                p[WidgetState.POSITION] = plane.positionLine
+                p[WidgetState.DETAIL] = plane.detail
+                p[WidgetState.EMERGENCY] = plane.emergency.orEmpty()
+                // An old position is worth saying out loud: the distance and bearing
+                // are measured from it, and nothing else on the tile hints at that.
+                p[WidgetState.STALE_NOTE] = fix.staleNote.orEmpty()
+                p[WidgetState.PINNED] = fix.source == PositionSource.FIXED
+                p[WidgetState.UPDATED_AT] = System.currentTimeMillis()
+                p[WidgetState.HEX] = plane.hex
+                p[WidgetState.BADGE] = pass.badge
+                p[WidgetState.FROM_CODE] = pass.fromCode
+                p[WidgetState.FROM_CITY] = pass.fromCity
+                p[WidgetState.TO_CODE] = pass.toCode
+                p[WidgetState.TO_CITY] = pass.toCity
+                p[WidgetState.PROGRESS] = pass.progress
+                p[WidgetState.ETA] = pass.eta
+                p[WidgetState.LOGO] = logo
+            }
+        }
+
+        internal suspend fun writeTiles(context: Context, block: (MutablePreferences) -> Unit) {
+            runCatching {
+                val manager = GlanceAppWidgetManager(context)
+                val widget = NearestPlaneWidget()
+                manager.getGlanceIds(NearestPlaneWidget::class.java).forEach { id ->
+                    updateAppWidgetState(context, id) { block(it) }
+                    widget.update(context, id)
+                }
+            }
+        }
+
         private const val PERIODIC_NAME = "nearest-plane-periodic"
         private const val ONE_SHOT_NAME = "nearest-plane-now"
 

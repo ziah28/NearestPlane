@@ -23,6 +23,7 @@ import androidx.glance.LocalContext
 import androidx.glance.LocalSize
 import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
@@ -93,8 +94,11 @@ class NearestPlaneWidget : GlanceAppWidget() {
 
         // A tile that says "open the app" and then doesn't when tapped is worse
         // than one that says nothing. Everywhere else, tap opens the detail screen.
+        // The detail screen opens on the plane shown here, not whatever is nearest now.
         val tap = if (status == "no_permission") actionStartActivity<MainActivity>()
-        else actionStartActivity<PlaneDetailActivity>()
+        else actionStartActivity<PlaneDetailActivity>(
+            actionParametersOf(PlaneDetailActivity.HEX_PARAM to prefs[WidgetState.HEX].orEmpty())
+        )
 
         Column(
             modifier = GlanceModifier

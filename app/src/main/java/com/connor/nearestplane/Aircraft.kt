@@ -22,7 +22,9 @@ data class Aircraft(
     val bearingDeg: Double?,
     val lat: Double?,
     val lon: Double?,
-    val squawk: String?
+    val squawk: String?,
+    /** Feet per minute, negative when descending. */
+    val verticalRateFpm: Int? = null
 ) {
     /** Callsign, then tail number, then hex. */
     val label: String

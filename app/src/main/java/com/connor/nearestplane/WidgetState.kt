@@ -34,5 +34,6 @@ object WidgetState {
     val TO_CITY = stringPreferencesKey("to_city")
     val PROGRESS = intPreferencesKey("progress")
     val ETA = stringPreferencesKey("eta")                // "Lands ~4 min"
+    val HEX = stringPreferencesKey("hex")                // the plane on the tile, for the detail screen
     val LOGO = stringPreferencesKey("logo")              // "U2" when that logo is saved on the phone
 }

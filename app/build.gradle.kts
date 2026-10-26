@@ -41,8 +41,8 @@ android {
         applicationId = "uk.co.zhaq.overhead"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.8"
+        versionCode = 9
+        versionName = "0.9"
     }
 
     signingConfigs {

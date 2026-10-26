@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Overhead</string>
     <string name="widget_label">Overhead</string>
-    <string name="widget_description">Shows the closest aircraft to your location.</string>
+    <string name="widget_description">Shows the plane overhead. Tap the arrow to refresh.</string>
     <string name="weather_widget_label">Nearest METAR</string>
     <string name="weather_widget_description">Shows the closest airport\'s current weather.</string>
 </resources>

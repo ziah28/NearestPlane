@@ -9,30 +9,32 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -40,23 +42,33 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.glance.appwidget.updateAll
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
+import androidx.work.WorkManager
 import com.connor.nearestplane.wx.AviationWeatherClient
-import com.connor.nearestplane.wx.WeatherWidget
-import com.connor.nearestplane.wx.WxRefreshWorker
 import kotlinx.coroutines.launch
-import java.util.Locale
 
 /**
- * The app is a setup screen — the widgets are the product.
+ * Overhead's settings screen: where you are, what counts as overhead, the
+ * flight-times key, and diagnostics. Light or dark with the phone, in the same
+ * colours as the widget.
  */
 class MainActivity : ComponentActivity() {
 
@@ -70,48 +82,29 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         readSystemState()
-        // Planes refresh only from the widget's button; weather keeps its schedule.
+        // Planes refresh only from the widget's button.
         RefreshWorker.cancelPeriodic(this)
-        WxRefreshWorker.schedulePeriodic(this)
         catchUpToWhereYouAre()
     }
 
     /**
-     * The one moment the app is certain to be given your location: now, while
-     * it is open. Every widget refresh runs in the background, where Android
-     * withholds location unless it is set to "Allow all the time" — so without
-     * this, a tile followed you only as far as wherever the app was last
-     * opened, and opening it again did not move it either.
-     *
-     * Asking costs one location request. Refreshing costs a fetch per tile, so
-     * that only happens when you have actually moved.
+     * Opening the app used to move the widgets to wherever you were. The plane
+     * widget now changes only when you tap its arrow, so there is nothing to
+     * catch up; the hook stays so the app has one place to do it if that changes.
      */
     private fun catchUpToWhereYouAre() {
-        if (!LocationSource.hasPermission(this)) return
-        lifecycleScope.launch {
-            val context = this@MainActivity
-            // A pin is a choice to stay put, not a position to correct.
-            if (AppSettings.fixedLocation(context) != null) return@launch
-            val before = AppSettings.lastPosition(context)
-            val now = LocationSource.deviceFix(context) ?: return@launch
-            // Our own saved fix is what we'd be comparing against; it tells
-            // us nothing new about where you are.
-            if (now.source == PositionSource.CACHED) return@launch
-            // Weather only: the plane tile keeps the last plane until you tap refresh.
-            if (movedFar(before, now.lat, now.lon)) {
-                WxRefreshWorker.refreshNow(context)
-            }
-        }
+        return
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         readSystemState()
         RefreshWorker.cancelPeriodic(this)
-        WxRefreshWorker.schedulePeriodic(this)
+        // The weather widget has been removed; stop any schedule an older build left.
+        runCatching { WorkManager.getInstance(this).cancelUniqueWork(WEATHER_PERIODIC) }
         setContent {
-            // Follows the phone: dark screens in dark mode, light otherwise.
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) { Screen() }
+            val palette = if (isSystemInDarkTheme()) Palette.Dark else Palette.Light
+            CompositionLocalProvider(LocalPalette provides palette) { Screen() }
         }
     }
 
@@ -121,65 +114,50 @@ class MainActivity : ComponentActivity() {
         background = LocationSource.hasBackgroundPermission(this)
     }
 
-    @OptIn(ExperimentalLayoutApi::class)
+    // ---------------------------------------------------------------- screen
+
     @Composable
     private fun Screen() {
+        val p = LocalPalette.current
         val activity = this
         val scope = rememberCoroutineScope()
-        val planeDiag by Diagnostics.report(activity, "plane")
+        val clipboard = LocalClipboardManager.current
+
+        val diag by Diagnostics.report(activity, "plane")
             .collectAsState(initial = Diagnostics.Report(0, 0, "", 0))
-        val wxDiag by Diagnostics.report(activity, "weather")
-            .collectAsState(initial = Diagnostics.Report(0, 0, "", 0))
-        val look by AppSettings.appearanceFlow(activity)
-            .collectAsState(initial = AppSettings.Appearance())
         val filter by AppSettings.planeFilterFlow(activity)
             .collectAsState(initial = AppSettings.PlaneFilter())
         val mode by AppSettings.locationModeFlow(activity)
             .collectAsState(initial = LocationMode.DEVICE)
         val pin by AppSettings.pinFlow(activity).collectAsState(initial = null)
-        val station by AppSettings.stationFlow(activity).collectAsState(initial = null)
-        val preferForecast by AppSettings.preferForecastFlow(activity).collectAsState(initial = false)
-        var stationUrl by remember { mutableStateOf("") }
-        var stationToken by remember { mutableStateOf("") }
-        var stationError by remember { mutableStateOf<String?>(null) }
-        // Show the saved address once it loads, without fighting the user's typing.
-        LaunchedEffect(station?.url) { station?.url?.let { if (stationUrl.isBlank()) stationUrl = it } }
+        val savedKey by AppSettings.timesKeyFlow(activity).collectAsState(initial = null)
 
         var code by remember { mutableStateOf("") }
         var pinBusy by remember { mutableStateOf(false) }
         var pinError by remember { mutableStateOf<String?>(null) }
-
+        var keyText by remember { mutableStateOf("") }
+        var diagOpen by remember { mutableStateOf(false) }
         var update by remember { mutableStateOf<Release?>(null) }
-        var updateChecked by remember { mutableStateOf(false) }
 
         // A sideloaded app has no update channel, so nothing would otherwise
-        // ever mention that a new version exists. Failure here is silent by
-        // design: not knowing about an update is not worth an error message.
-        suspend fun checkForUpdate() {
+        // ever mention that a new version exists. Failure is silent by design.
+        LaunchedEffect(Unit) {
             update = runCatching { UpdateCheck.latest() }.getOrNull()
                 ?.takeIf { UpdateCheck.isNewer(it.version, BuildConfig.VERSION_NAME) }
-            updateChecked = true
         }
 
-        LaunchedEffect(Unit) { checkForUpdate() }
-
-        fun redrawWidgets() = scope.launch {
-            NearestPlaneWidget().updateAll(activity)
-            WeatherWidget().updateAll(activity)
-        }
-
-        // Settings that change *what is fetched* need a refetch, not a redraw.
-        fun refetch() {
-            RefreshWorker.refreshNow(activity)
-            WxRefreshWorker.refreshNow(activity)
-        }
+        // Settings that change what is fetched: refresh once, as if you'd tapped the arrow.
+        fun refetch() = RefreshWorker.refreshNow(activity)
 
         val requestPermissions = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
         ) {
             granted = LocationSource.hasPermission(activity)
-            if (granted) refetch()
+            background = LocationSource.hasBackgroundPermission(activity)
         }
+        fun askForLocation() = requestPermissions.launch(
+            arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
+        )
 
         fun pinAirport() = scope.launch {
             pinBusy = true
@@ -187,14 +165,13 @@ class MainActivity : ComponentActivity() {
             try {
                 val found = AviationWeatherClient.airport(code)
                 if (found == null) {
-                    pinError = "No airport found for \"${code.trim().uppercase()}\"."
+                    pinError = "No airport found for \"${code.trim().uppercase()}\". Try its four-letter code, like EGCC."
                 } else {
                     AppSettings.savePin(activity, found.id, found.lat, found.lon)
                     code = ""
-                    refetch()
                 }
             } catch (e: Exception) {
-                pinError = e.message ?: "Lookup failed."
+                pinError = "Couldn't look that up. Check your connection and try again."
             } finally {
                 pinBusy = false
             }
@@ -204,587 +181,398 @@ class MainActivity : ComponentActivity() {
             pinBusy = true
             pinError = null
             try {
-                // deviceFix, not current: a pin is already in effect, and asking
-                // for "the current position" would just hand back the pin.
-                val fix = LocationSource.deviceFix(activity)
-                if (fix == null) {
-                    pinError = "No position available yet. Try again in a moment."
-                } else {
-                    AppSettings.savePin(activity, "Pinned position", fix.lat, fix.lon)
-                    refetch()
-                }
+                val fix = LocationSource.deviceFix(activity, fresh = true)
+                if (fix == null) pinError = "No position yet. Try again in a moment."
+                else AppSettings.savePin(activity, "Pinned position", fix.lat, fix.lon)
             } catch (e: Exception) {
-                pinError = e.message ?: "Couldn't read your position."
+                pinError = "Couldn't read your position."
             } finally {
                 pinBusy = false
             }
         }
 
-        Scaffold { padding ->
+        Box(modifier = Modifier.fillMaxSize().background(p.ground)) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
-                    .padding(20.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                    .systemBarsPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text("Nearest Plane", style = MaterialTheme.typography.headlineMedium)
-
-                update?.let { available ->
-                    SectionCard("Version ${available.version} is available") {
-                        Text(
-                            "You have ${BuildConfig.VERSION_NAME}. Downloading opens your " +
-                                "browser; tap the file when it lands to install over the top.",
-                            style = MaterialTheme.typography.bodySmall
+                // Header
+                Row(
+                    modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // The app icon, built from its own layers: the launcher's
+                    // adaptive icon can't be drawn directly in the app.
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF12161D)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.foundation.Image(
+                            painter = androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground),
+                            contentDescription = null,
+                            modifier = Modifier.requiredSize(66.dp)
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
-                                openUrl(available.apkUrl)
-                            }) { Text("Download") }
-                            OutlinedButton(onClick = { openUrl(available.pageUrl) }) {
-                                Text("What changed")
-                            }
-                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text("Overhead", style = display(24.sp), color = p.ink)
+                        Text("Version ${BuildConfig.VERSION_NAME}", style = body(12.sp), color = p.muted)
                     }
                 }
 
-                SectionCard("Location") {
-                    Text(
-                        "Both widgets need a position to work out what's closest.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    LocationMode.entries.forEach { option ->
-                        WideOption(
-                            title = option.label,
-                            subtitle = option.blurb,
-                            selected = mode == option,
-                            onSelect = {
-                                scope.launch {
-                                    AppSettings.setLocationMode(activity, option)
-                                    refetch()
-                                }
-                            }
-                        )
+                update?.let { available ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(p.accentFill)
+                            .padding(horizontal = 18.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Version ${available.version} is ready", style = display(16.sp), color = p.onAccent)
+                            Text("From your releases on GitHub", style = body(12.sp), color = p.onAccent.copy(alpha = 0.8f))
+                        }
+                        Pill("Download", fill = p.onAccent, text = p.accentFill) { openUrl(available.apkUrl) }
                     }
+                }
 
-                    HorizontalDivider()
-
-                    if (mode == LocationMode.DEVICE) {
-                        if (granted && background) {
-                            Text("Location is allowed all the time. The widgets follow you.")
-                        } else if (granted) {
-                            // Checked, not assumed. This used to give the same
-                            // advice whether or not it had been taken, so there
-                            // was no way to tell which state you were in.
-                            Text(
-                                "Location is allowed only while the app is open.",
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                "The widgets refresh with the app closed, and Android won't " +
-                                    "tell them where you are then. They stay wherever the app " +
-                                    "was last open, and the refresh buttons can't move them " +
-                                    "either. Set location to \"Allow all the time\" in app " +
-                                    "settings; Android won't let an app ask for that from a dialog.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            OutlinedButton(onClick = { openAppSettings() }) {
-                                Text("Open app settings")
+                // Where you are
+                Section("Where you are", "The widget looks for the plane nearest this point.") {
+                    Segmented(
+                        options = listOf("Follow my phone", "Fixed place"),
+                        selected = if (mode == LocationMode.DEVICE) 0 else 1,
+                        onSelect = { i ->
+                            scope.launch {
+                                AppSettings.setLocationMode(activity, if (i == 0) LocationMode.DEVICE else LocationMode.FIXED)
                             }
-                            Text(
-                                "Until then, opening this screen catches the widgets up to " +
-                                    "where you are.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        } else {
-                            Text("This mode needs location access.")
-                            Button(onClick = {
-                                requestPermissions.launch(
-                                    arrayOf(
-                                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                                        Manifest.permission.ACCESS_FINE_LOCATION
-                                    )
-                                )
-                            }) { Text("Grant location access") }
+                        }
+                    )
+                    if (mode == LocationMode.DEVICE) {
+                        Column {
+                            Rule()
+                            when {
+                                granted && background -> Status(true, "Location allowed all the time", "Needed so a tap on the widget can find you")
+                                granted -> Status(false, "Location only while the app is open", "Set it to Allow all the time, or widget taps can't find you", "Fix") { openAppSettings() }
+                                else -> Status(false, "Location is off for Overhead", "Allow it, then choose Allow all the time", "Allow") { askForLocation() }
+                            }
+                            Rule()
+                            if (optimized) {
+                                Status(false, "Battery is restricted", "Refreshes may be slow to start", "Fix") { requestBatteryExemption() }
+                            } else {
+                                Status(true, "Battery unrestricted", "Refreshes start straight away")
+                            }
                         }
                     } else {
                         val current = pin
-                        if (current == null) {
-                            Text("Nowhere pinned yet — the widgets have nothing to work from.")
-                        } else {
-                            Text("Pinned to ${current.label}", fontWeight = FontWeight.Medium)
-                            Text(
-                                "%.4f, %.4f".format(Locale.US, current.lat, current.lon),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-
-                        OutlinedTextField(
+                        Text(
+                            if (current == null) "Nowhere pinned yet." else "Pinned to ${current.label}",
+                            style = body(14.sp, FontWeight.Medium), color = p.ink
+                        )
+                        Field(
                             value = code,
                             onValueChange = { code = it; pinError = null },
-                            label = { Text("Airport code") },
-                            placeholder = { Text("KJFK, EGLL, YSSY…") },
-                            singleLine = true,
-                            enabled = !pinBusy,
-                            keyboardOptions = KeyboardOptions(
-                                capitalization = KeyboardCapitalization.Characters,
-                                imeAction = ImeAction.Done
-                            ),
-                            modifier = Modifier.fillMaxWidth()
+                            placeholder = "Airport code, like EGCC",
+                            capitalise = true
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = { pinAirport() },
-                                enabled = !pinBusy && code.isNotBlank()
-                            ) { Text("Pin airport") }
-                            OutlinedButton(
-                                onClick = {
-                                    if (granted) {
-                                        pinHere()
-                                    } else {
-                                        requestPermissions.launch(
-                                            arrayOf(
-                                                Manifest.permission.ACCESS_COARSE_LOCATION,
-                                                Manifest.permission.ACCESS_FINE_LOCATION
-                                            )
-                                        )
-                                    }
-                                },
-                                enabled = !pinBusy
-                            ) { Text("Pin where I am") }
-                        }
-                        pinError?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                        Text(
-                            "\"Pin where I am\" needs location access once, and then never " +
-                                "again — no background permission, and nothing to grant in " +
-                                "Settings by hand.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-
-                SectionCard("Plane search") {
-                    Text(
-                        "Applies to the Nearest Plane tile.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text("Range", fontWeight = FontWeight.Medium)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SearchRadius.entries.forEach { option ->
-                            FilterChip(
-                                selected = filter.radius == option,
-                                onClick = {
-                                    scope.launch {
-                                        AppSettings.setRadius(activity, option)
-                                        refetch()
-                                    }
-                                },
-                                label = { Text(option.label) }
-                            )
-                        }
-                    }
-                    Text("Ceiling", fontWeight = FontWeight.Medium)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AltitudeCeiling.entries.forEach { option ->
-                            FilterChip(
-                                selected = filter.ceiling == option,
-                                onClick = {
-                                    scope.launch {
-                                        AppSettings.setCeiling(activity, option)
-                                        refetch()
-                                    }
-                                },
-                                label = { Text(option.label) }
-                            )
-                        }
-                    }
-                    Text(
-                        "A ceiling is what stops the tile showing the same airliner at " +
-                            "FL380 forty miles away every time. If you live under an airway, " +
-                            "it's the difference between a widget and wallpaper.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                SectionCard("Your own receiver") {
-                    Text(
-                        "If you run sdr_windows, or anything that serves dump1090's " +
-                            "aircraft.json, the plane tile asks it first. When it hears nothing " +
-                            "in range, adsb.fi is asked as usual.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    station?.let {
-                        Text("Asking ${it.url}", fontWeight = FontWeight.Medium)
-                    }
-                    OutlinedTextField(
-                        value = stationUrl,
-                        onValueChange = { stationUrl = it; stationError = null },
-                        label = { Text("Station address") },
-                        placeholder = { Text("https://my-pc.tailnet.ts.net") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = stationToken,
-                        onValueChange = { stationToken = it },
-                        label = {
-                            Text(if (station?.token.isNullOrBlank()) "Dashboard token" else "Dashboard token (saved)")
-                        },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                val url = normalizeStationUrl(stationUrl)
-                                if (url == null) {
-                                    stationError = "That needs to be an https:// address, like the one " +
-                                        "tailscale serve prints."
-                                } else {
-                                    scope.launch {
-                                        AppSettings.setStation(activity, url, stationToken.trim())
-                                        stationUrl = url
-                                        stationToken = ""
-                                        refetch()
-                                    }
-                                }
-                            },
-                            enabled = stationUrl.isNotBlank()
-                        ) { Text("Save") }
-                        if (station != null) {
-                            OutlinedButton(onClick = {
-                                scope.launch {
-                                    AppSettings.clearStation(activity)
-                                    stationUrl = ""
-                                    stationToken = ""
-                                    refetch()
-                                }
-                            }) { Text("Stop using it") }
-                        }
-                    }
-                    stationError?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                    }
-                    Text(
-                        "HTTPS only: Tailscale Serve gives the station a real certificate. The " +
-                            "token stays on this phone and is left out of Android's backups. " +
-                            "If the station cannot be reached, Diagnostics says why.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                SectionCard("Background") {
-                    Text("Applies to both widgets.", style = MaterialTheme.typography.bodySmall)
-                    WidgetBackground.entries.forEach { option ->
-                        WideOption(
-                            title = option.label,
-                            subtitle = option.blurb,
-                            selected = look.background == option,
-                            onSelect = {
-                                scope.launch {
-                                    AppSettings.setBackground(activity, option)
-                                    redrawWidgets()
-                                }
+                            Pill("Pin airport", fill = p.accentFill, text = p.onAccent, enabled = !pinBusy && code.isNotBlank()) { pinAirport() }
+                            Pill("Pin where I am", fill = p.badge, text = p.ink, enabled = !pinBusy) {
+                                if (granted) pinHere() else askForLocation()
                             }
-                        )
+                        }
+                        pinError?.let { Text(it, style = body(12.sp, FontWeight.Medium), color = p.warn) }
                     }
                 }
 
-                SectionCard("Text colour") {
-                    Text(
-                        "Automatic follows your theme on Material You, and goes white on " +
-                            "Scrim or Transparent. Pick a fixed colour if your wallpaper " +
-                            "fights with it.",
-                        style = MaterialTheme.typography.bodySmall
+                // What counts as overhead
+                Section("What counts as overhead", "A low ceiling skips airliners cruising miles up.") {
+                    Choice(
+                        label = "Range", unit = "nautical miles",
+                        options = SearchRadius.entries.map { it.nm.toString() },
+                        selected = SearchRadius.entries.indexOf(filter.radius),
+                        onSelect = { i -> scope.launch { AppSettings.setRadius(activity, SearchRadius.entries[i]); refetch() } }
                     )
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        WidgetTextColor.entries.forEach { option ->
-                            FilterChip(
-                                selected = look.textColor == option,
-                                onClick = {
-                                    scope.launch {
-                                        AppSettings.setTextColor(activity, option)
-                                        redrawWidgets()
-                                    }
-                                },
-                                label = { Text(option.label) }
-                            )
-                        }
-                    }
-                }
-
-                SectionCard("Text size and weight") {
-                    Text("Size", fontWeight = FontWeight.Medium)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        WidgetTextScale.entries.forEach { option ->
-                            FilterChip(
-                                selected = look.textScale == option,
-                                onClick = {
-                                    scope.launch {
-                                        AppSettings.setTextScale(activity, option)
-                                        redrawWidgets()
-                                    }
-                                },
-                                label = { Text(option.label) }
-                            )
-                        }
-                    }
-                    Text("Weight", fontWeight = FontWeight.Medium)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        WidgetTextWeight.entries.forEach { option ->
-                            FilterChip(
-                                selected = look.textWeight == option,
-                                onClick = {
-                                    scope.launch {
-                                        AppSettings.setTextWeight(activity, option)
-                                        redrawWidgets()
-                                    }
-                                },
-                                label = { Text(option.label) }
-                            )
-                        }
-                    }
-                    Text(
-                        "Bold is the default, and it's the other half of legibility over a " +
-                            "photo — Glance can't draw a text shadow, so weight and colour " +
-                            "are the only levers there are.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Larger text may clip on a small tile — drag the widget's edge to " +
-                            "resize it if that happens.",
-                        style = MaterialTheme.typography.bodySmall
+                    Choice(
+                        label = "Ceiling", unit = "feet",
+                        options = AltitudeCeiling.entries.map { c -> c.maxFt?.let { "${it / 1000}k" } ?: "Any" },
+                        selected = AltitudeCeiling.entries.indexOf(filter.ceiling),
+                        onSelect = { i -> scope.launch { AppSettings.setCeiling(activity, AltitudeCeiling.entries[i]); refetch() } }
                     )
                 }
 
-                SectionCard("Weather station") {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(false to "Nearest airport", true to "Nearest with a forecast")
-                            .forEach { (option, label) ->
-                                FilterChip(
-                                    selected = preferForecast == option,
-                                    onClick = {
-                                        scope.launch {
-                                            AppSettings.setPreferForecast(activity, option)
-                                            WxRefreshWorker.refreshNow(activity)
-                                        }
-                                    },
-                                    label = { Text(label) }
-                                )
+                // Flight times
+                Section("Flight times", "Departure, arrival and delays. About 200 lookups a month on the free plan.") {
+                    Text("AeroDataBox key", style = body(13.sp, FontWeight.SemiBold), color = p.ink)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            Field(
+                                value = keyText,
+                                onValueChange = { keyText = it },
+                                placeholder = if (savedKey != null) "Saved · ends ${savedKey!!.takeLast(4)}" else "Paste your key",
+                                secret = true
+                            )
+                        }
+                        Pill("Paste", fill = p.badge, text = p.ink) {
+                            clipboard.getText()?.text?.trim()?.takeIf { it.isNotBlank() }?.let { keyText = it }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Save key", fill = p.accentFill, text = p.onAccent, enabled = keyText.isNotBlank()) {
+                            scope.launch { AppSettings.setTimesKey(activity, keyText); keyText = "" }
+                        }
+                        if (savedKey != null) {
+                            Pill("Remove", fill = p.badge, text = p.ink) {
+                                scope.launch { AppSettings.clearTimesKey(activity) }
                             }
+                        }
                     }
                     Text(
-                        "Only larger airports issue a TAF, so the nearest station often has " +
-                            "today's weather but no forecast. \"Nearest with a forecast\" skips " +
-                            "those for the nearest one that has both, still within about 45 nm. " +
-                            "If none in range does, the tile uses the nearest airport anyway.",
-                        style = MaterialTheme.typography.bodySmall
+                        if (savedKey != null) "Key saved on this phone" else "No key yet. Times show as --:-- without one.",
+                        style = body(12.sp, FontWeight.Medium),
+                        color = if (savedKey != null) p.ok else p.muted
                     )
+                    Text("Times by AeroDataBox", style = body(11.sp), color = p.muted)
                 }
 
-                SectionCard("Temperature") {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TemperatureUnit.entries.forEach { option ->
-                            FilterChip(
-                                selected = look.temperature == option,
-                                onClick = {
-                                    scope.launch {
-                                        AppSettings.setTemperature(activity, option)
-                                        // The summary line is built when the METAR
-                                        // is fetched, so this needs a refetch.
-                                        WxRefreshWorker.refreshNow(activity)
-                                    }
-                                },
-                                label = { Text(option.label) }
+                // Diagnostics
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(p.card)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .clickable(role = Role.Button) { diagOpen = !diagOpen }
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text("Diagnostics", style = display(17.sp), color = p.ink)
+                            val result = when {
+                                diag.lastRun == 0L -> "No refreshes yet"
+                                diag.lastOk >= diag.lastRun -> "Last refresh ${Diagnostics.timeAgo(diag.lastRun)} · worked"
+                                else -> "Last refresh ${Diagnostics.timeAgo(diag.lastRun)} · failed"
+                            }
+                            Text(result, style = body(12.sp), color = p.muted)
+                        }
+                        Text(if (diagOpen) "−" else "+", style = display(20.sp), color = p.muted)
+                    }
+                    if (diagOpen) {
+                        Column(
+                            modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Rule()
+                            Detail("Last refresh", Diagnostics.timeAgo(diag.lastRun))
+                            Detail("Last success", Diagnostics.timeAgo(diag.lastOk))
+                            Detail("Position used", diag.lastPosition.ifBlank { "—" })
+                            Detail(
+                                "Last error",
+                                if (diag.lastError.isBlank()) "None"
+                                else "${Diagnostics.clockTime(diag.lastErrorAt)} · ${diag.lastError}"
                             )
                         }
                     }
-                    Text(
-                        "The METAR tile only. Raw METARs are always in Celsius, and the " +
-                            "detail screen shows both regardless.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
                 }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
 
-                if (optimized) {
-                    SectionCard("Background refresh is restricted") {
-                        Text(
-                            "Android is holding this app under battery optimisation. That " +
-                                "defers the widgets' scheduled updates indefinitely, which is " +
-                                "why they only refresh when you open the app.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Button(onClick = { requestBatteryExemption() }) {
-                            Text("Allow background updates")
-                        }
-                        Text(
-                            "On Samsung and Xiaomi you may also need Settings → Apps → " +
-                                "Nearest Plane → Battery → Unrestricted.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+    // ------------------------------------------------------------ components
+
+    @Composable
+    private fun Section(title: String, subtitle: String, content: @Composable () -> Unit) {
+        val p = LocalPalette.current
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(p.card)
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, style = display(17.sp), color = p.ink)
+                Text(subtitle, style = body(12.sp), color = p.muted)
+            }
+            content()
+        }
+    }
+
+    @Composable
+    private fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+        val p = LocalPalette.current
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(p.badge)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            options.forEachIndexed { i, label ->
+                val on = i == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(if (on) p.card else Color.Transparent)
+                        .clickable(role = Role.Tab) { onSelect(i) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(label, style = body(14.sp, if (on) FontWeight.SemiBold else FontWeight.Medium), color = if (on) p.ink else p.muted)
                 }
-
-                SectionCard("Diagnostics") {
-                    Text(
-                        "Planes: last run ${Diagnostics.timeAgo(planeDiag.lastRun)}, " +
-                            "last success ${Diagnostics.timeAgo(planeDiag.lastOk)}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    if (planeDiag.lastPosition.isNotBlank()) {
-                        Text(
-                            "Planes used: ${planeDiag.lastPosition}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    if (planeDiag.lastError.isNotBlank()) {
-                        Text(
-                            "Planes error at ${Diagnostics.clockTime(planeDiag.lastErrorAt)}: " +
-                                planeDiag.lastError,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Text(
-                        "Weather: last run ${Diagnostics.timeAgo(wxDiag.lastRun)}, " +
-                            "last success ${Diagnostics.timeAgo(wxDiag.lastOk)}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    if (wxDiag.lastPosition.isNotBlank()) {
-                        Text(
-                            "Weather used: ${wxDiag.lastPosition}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    if (wxDiag.lastError.isNotBlank()) {
-                        Text(
-                            "Weather error at ${Diagnostics.clockTime(wxDiag.lastErrorAt)}: " +
-                                wxDiag.lastError,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Text(
-                        "If \"last run\" is hours old, the system isn't running the job at all " +
-                            "— that's battery optimisation, not a bug in the fetch.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "If \"used\" says this app's last saved location and it's hours old, " +
-                            "the refreshes are running but Android isn't giving them your " +
-                            "location — see Location above.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                SectionCard("Refresh now") {
-                    Text(
-                        "Background updates run every 15 min (planes) and 30 min (weather).",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { RefreshWorker.refreshNow(activity) }) {
-                            Text("Planes")
-                        }
-                        OutlinedButton(onClick = { WxRefreshWorker.refreshNow(activity) }) {
-                            Text("Weather")
-                        }
-                    }
-                }
-
-                SectionCard("Version") {
-                    Text(
-                        "Nearest Plane ${BuildConfig.VERSION_NAME}",
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        if (update != null) "An update is waiting, above."
-                        else if (updateChecked) "This is the latest release."
-                        else "Checking for a newer release…",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = {
-                            updateChecked = false
-                            scope.launch { checkForUpdate() }
-                        }) { Text("Check again") }
-                        OutlinedButton(onClick = {
-                            openUrl("https://github.com/ziah28/NearestPlane")
-                        }) { Text("Source") }
-                    }
-                }
-
-                Text(
-                    "Add the tiles by long-pressing your home screen, tapping Widgets, then " +
-                        "finding Nearest Plane. Two tiles are listed.",
-                    style = MaterialTheme.typography.bodySmall
-                )
             }
         }
     }
 
     @Composable
-    private fun SectionCard(title: String, content: @Composable () -> Unit) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+    private fun Choice(label: String, unit: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+        val p = LocalPalette.current
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(label, style = body(13.sp, FontWeight.SemiBold), color = p.ink, modifier = Modifier.weight(1f))
+                Text(unit, style = body(13.sp), color = p.muted)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                options.forEachIndexed { i, option ->
+                    val on = i == selected
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (on) p.accentFill else p.card)
+                            .border(1.dp, if (on) p.accentFill else p.rule, RoundedCornerShape(12.dp))
+                            .clickable(role = Role.RadioButton) { onSelect(i) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(option, style = display(15.sp), color = if (on) p.onAccent else p.ink)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun Status(ok: Boolean, title: String, detail: String, action: String? = null, onAction: () -> Unit = {}) {
+        val p = LocalPalette.current
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier.size(22.dp).clip(RoundedCornerShape(11.dp)).background(if (ok) p.okFill else p.lateFill),
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    title.uppercase(),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                HorizontalDivider()
-                content()
+                Text(if (ok) "✓" else "!", style = body(12.sp, FontWeight.Bold), color = if (ok) p.ok else p.late)
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(title, style = body(14.sp, FontWeight.Medium), color = p.ink)
+                Text(detail, style = body(12.sp), color = p.muted)
+            }
+            if (action != null) {
+                Box(
+                    modifier = Modifier.heightIn(min = 44.dp).clickable(role = Role.Button, onClick = onAction).padding(horizontal = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(action, style = body(14.sp, FontWeight.SemiBold), color = p.accentText)
+                }
             }
         }
     }
 
     @Composable
-    private fun WideOption(
-        title: String,
-        subtitle: String,
-        selected: Boolean,
-        onSelect: () -> Unit
-    ) {
-        val modifier = Modifier.fillMaxWidth()
-        val body: @Composable () -> Unit = {
-            Column {
-                Text(title, fontWeight = FontWeight.Medium)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall)
-            }
+    private fun Pill(label: String, fill: Color, text: Color, enabled: Boolean = true, onClick: () -> Unit) {
+        Box(
+            modifier = Modifier
+                .height(44.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(if (enabled) fill else fill.copy(alpha = 0.4f))
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .padding(horizontal = 18.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(label, style = body(14.sp, FontWeight.SemiBold), color = if (enabled) text else text.copy(alpha = 0.6f))
         }
-        if (selected) Button(onClick = onSelect, modifier = modifier) { body() }
-        else OutlinedButton(onClick = onSelect, modifier = modifier) { body() }
     }
 
-    /**
-     * Opens the system dialog that exempts this app from Doze. Without the
-     * exemption, WorkManager's scheduled jobs are deferred for hours.
-     */
+    @Composable
+    private fun Field(
+        value: String,
+        onValueChange: (String) -> Unit,
+        placeholder: String,
+        secret: Boolean = false,
+        capitalise: Boolean = false
+    ) {
+        val p = LocalPalette.current
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = body(14.sp).copy(color = p.ink),
+            cursorBrush = SolidColor(p.accentText),
+            visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+            keyboardOptions = KeyboardOptions(
+                capitalization = if (capitalise) KeyboardCapitalization.Characters else KeyboardCapitalization.None,
+                imeAction = ImeAction.Done
+            ),
+            decorationBox = { inner ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(p.ground)
+                        .border(1.dp, p.rule, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (value.isEmpty()) Text(placeholder, style = body(14.sp), color = p.muted)
+                    inner()
+                }
+            }
+        )
+    }
+
+    @Composable
+    private fun Rule() {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(LocalPalette.current.rule))
+    }
+
+    @Composable
+    private fun Detail(label: String, value: String) {
+        val p = LocalPalette.current
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(label, style = body(12.sp), color = p.muted, modifier = Modifier.width(104.dp))
+            Text(value, style = body(13.sp), color = p.ink, modifier = Modifier.weight(1f))
+        }
+    }
+
+    // ---------------------------------------------------------------- system
+
+    /** Opens the system dialog that exempts this app from battery limits. */
     private fun requestBatteryExemption() {
         runCatching {
-            startActivity(
-                Intent(
-                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    Uri.parse("package:$packageName")
-                )
-            )
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
         }.onFailure {
-            // Some OEM builds block the direct request; fall back to the list.
-            runCatching {
-                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-            }
+            // Some phone makers block the direct request; fall back to the list.
+            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
         }
     }
 
@@ -793,11 +581,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openAppSettings() {
-        startActivity(
-            Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.fromParts("package", packageName, null)
-            )
-        )
+        runCatching {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+        }
+    }
+
+    private companion object {
+        const val WEATHER_PERIODIC = "nearest-wx-periodic"
     }
 }
