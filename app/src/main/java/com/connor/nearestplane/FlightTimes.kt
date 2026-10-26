@@ -80,7 +80,8 @@ object FlightTimes {
     private fun prefs(context: Context) = context.getSharedPreferences("flight_times", Context.MODE_PRIVATE)
 
     private fun cacheKey(plane: Aircraft) =
-        "t:${plane.hex.lowercase(Locale.US)}:${plane.callsign?.trim()?.uppercase(Locale.US).orEmpty()}"
+        // "t2": answers saved before the leg-matching fix may hold the wrong leg, so they're not reused.
+        "t2:${plane.hex.lowercase(Locale.US)}:${plane.callsign?.trim()?.uppercase(Locale.US).orEmpty()}"
 
     /** Saved times for this flight, if any. Never costs a lookup. */
     fun cached(context: Context, plane: Aircraft): FlightSchedule? {
@@ -125,7 +126,7 @@ object FlightTimes {
         if (code !in 200..299 && code != 204 && code != 404) return null
         setStatus(context, KeyStatus.WORKS)
 
-        val schedule = if (code == 200) runCatching { pick(body) }.getOrNull() else null
+        val schedule = if (code == 200) runCatching { pick(body, plane) }.getOrNull() else null
         // Remember the answer, including "no schedule", so this flight is never asked about twice.
         val saved = JSONObject().put("at", System.currentTimeMillis())
         schedule?.departure?.let { saved.put("dep", writeTime(it)) }
@@ -178,7 +179,11 @@ object FlightTimes {
 
     private fun trimCache(context: Context) {
         val p = prefs(context)
-        val entries = p.all.filterKeys { it.startsWith("t:") }
+        // Old-format entries ("t:") are dropped here too.
+        p.all.keys.filter { it.startsWith("t:") }.takeIf { it.isNotEmpty() }?.let { old ->
+            p.edit().apply { old.forEach { remove(it) } }.apply()
+        }
+        val entries = p.all.filterKeys { it.startsWith("t2:") }
         if (entries.size <= 300) return
         val e = p.edit()
         entries.keys.sortedBy { runCatching { JSONObject(entries[it] as String).optLong("at") }.getOrDefault(0L) }
@@ -213,7 +218,7 @@ object FlightTimes {
      * the one that has departed but not landed, else the one scheduled
      * closest to now.
      */
-    private fun pick(body: String): FlightSchedule? {
+    private fun pick(body: String, plane: Aircraft): FlightSchedule? {
         val trimmed = body.trim()
         val flights: List<JSONObject> = when {
             trimmed.startsWith("[") -> JSONArray(trimmed).let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }
@@ -226,15 +231,46 @@ object FlightTimes {
         fun utcOf(end: JSONObject?, field: String): Long? =
             end?.optJSONObject(field)?.optString("utc")?.let(::parseUtc)
 
-        val airborne = flights.firstOrNull { f ->
+        // An aircraft flies several legs a day, and an airport doesn't always
+        // report the earlier ones as landed. So first: the leg whose callsign
+        // matches, and whose route the plane is actually sitting on.
+        val callsign = plane.callsign?.replace(" ", "")?.uppercase(Locale.US).orEmpty()
+        val sameCallsign = flights.filter { it.optString("callSign").replace(" ", "").uppercase(Locale.US) == callsign }
+        val pool = sameCallsign.ifEmpty { flights }
+        val lat = plane.lat
+        val lon = plane.lon
+        val onTheLine = if (lat != null && lon != null) {
+            pool.mapNotNull { f ->
+                val o = airport(f.optJSONObject("departure")?.optJSONObject("airport")) ?: return@mapNotNull null
+                val d = airport(f.optJSONObject("arrival")?.optJSONObject("airport")) ?: return@mapNotNull null
+                val direct = RouteMath.nmBetween(o.lat, o.lon, d.lat, d.lon).coerceAtLeast(1.0)
+                val toDest = RouteMath.nmBetween(lat, lon, d.lat, d.lon)
+                val via = RouteMath.nmBetween(o.lat, o.lon, lat, lon) + toDest
+                // The outbound and return legs share a line, so the heading decides:
+                // the plane should be pointing roughly at its destination, unless
+                // it's close enough to be turning onto the runway.
+                val track = plane.trackDeg
+                val heading = track == null || toDest < 20 || run {
+                    val off = kotlin.math.abs(((RouteMath.bearingTo(lat, lon, d.lat, d.lon) - track + 540) % 360) - 180)
+                    off < 100
+                }
+                Triple(f, via / direct, heading)
+            }
+                // Within a quarter of the straight line: real flights bend a little, wrong legs a lot.
+                .filter { it.second < 1.25 }
+                .let { fits -> fits.filter { it.third }.ifEmpty { fits } }
+                .minByOrNull { it.second }?.first
+        } else null
+
+        val airborne = onTheLine ?: pool.firstOrNull { f ->
             val dep = f.optJSONObject("departure")
             val arr = f.optJSONObject("arrival")
             val left = utcOf(dep, "runwayTime") ?: utcOf(dep, "revisedTime")
             left != null && left <= now && utcOf(arr, "runwayTime") == null
-        } ?: flights.firstOrNull { f ->
+        } ?: pool.firstOrNull { f ->
             f.optString("status").let { it.contains("Route", true) || it.contains("Departed", true) || it.contains("Approaching", true) }
         }
-        val chosen = airborne ?: flights.minByOrNull { f ->
+        val chosen = airborne ?: pool.minByOrNull { f ->
             val s = utcOf(f.optJSONObject("departure"), "scheduledTime") ?: return@minByOrNull Long.MAX_VALUE
             kotlin.math.abs(s - now)
         } ?: return null

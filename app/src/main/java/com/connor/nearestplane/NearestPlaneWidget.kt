@@ -135,6 +135,12 @@ class NearestPlaneWidget : GlanceAppWidget() {
 
     @Composable
     private fun ColumnScope.Pass(prefs: Preferences) {
+        // Launchers size a 4x3 differently. When the tile is short, the extras go
+        // first (scheduled times, then weather) so the bottom row is never cut off.
+        // The detail screen always has everything.
+        val tileHeight = LocalSize.current.height.value
+        val showSched = tileHeight >= FULL_HEIGHT
+        val showWx = tileHeight >= WEATHER_HEIGHT
         val airline = prefs[WidgetState.AIRLINE].orEmpty()
         val type = prefs[WidgetState.TYPE_NAME].orEmpty()
         val emergency = prefs[WidgetState.EMERGENCY].orEmpty()
@@ -161,8 +167,8 @@ class NearestPlaneWidget : GlanceAppWidget() {
             to = prefs[WidgetState.TO_CODE].orEmpty().ifBlank { UNKNOWN },
             toCity = prefs[WidgetState.TO_CITY].orEmpty().ifBlank { UNKNOWN },
             progress = progress,
-            fromWx = prefs[WidgetState.FROM_WX].orEmpty() to prefs[WidgetState.FROM_WX_ICON].orEmpty(),
-            toWx = prefs[WidgetState.TO_WX].orEmpty() to prefs[WidgetState.TO_WX_ICON].orEmpty()
+            fromWx = if (showWx) prefs[WidgetState.FROM_WX].orEmpty() to prefs[WidgetState.FROM_WX_ICON].orEmpty() else "" to "",
+            toWx = if (showWx) prefs[WidgetState.TO_WX].orEmpty() to prefs[WidgetState.TO_WX_ICON].orEmpty() else "" to ""
         )
 
         Gap()
@@ -174,7 +180,8 @@ class NearestPlaneWidget : GlanceAppWidget() {
                     sched = prefs[WidgetState.DEP_SCHED].orEmpty(),
                     pill = prefs[WidgetState.DEP_PILL].orEmpty(),
                     late = prefs[WidgetState.DEP_LATE] ?: -1,
-                    end = false
+                    end = false,
+                    showMeta = showSched
                 )
             }
             Box(modifier = GlanceModifier.defaultWeight(), contentAlignment = Alignment.TopEnd) {
@@ -184,7 +191,8 @@ class NearestPlaneWidget : GlanceAppWidget() {
                     sched = prefs[WidgetState.ARR_SCHED].orEmpty(),
                     pill = prefs[WidgetState.ARR_PILL].orEmpty(),
                     late = prefs[WidgetState.ARR_LATE] ?: -1,
-                    end = true
+                    end = true,
+                    showMeta = showSched
                 )
             }
         }
@@ -221,12 +229,12 @@ class NearestPlaneWidget : GlanceAppWidget() {
      * later, plain when there's nothing to judge it by, and --:-- when unknown.
      */
     @Composable
-    private fun TimeColumn(label: String, time: String, sched: String, pill: String, late: Int, end: Boolean) {
+    private fun TimeColumn(label: String, time: String, sched: String, pill: String, late: Int, end: Boolean, showMeta: Boolean = true) {
         val colour = when (late) { 1 -> Ink.late; 0 -> Ink.ok; else -> Ink.ink }
         Column(horizontalAlignment = if (end) Alignment.Horizontal.End else Alignment.Horizontal.Start) {
             Text(text = label, style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Ink.muted))
             DisplayText(time.ifBlank { "--:--" }, 20f, if (time.isBlank()) Ink.muted else colour)
-            if (sched.isNotBlank() || pill.isNotBlank()) {
+            if (showMeta && (sched.isNotBlank() || pill.isNotBlank())) {
                 Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
                     if (sched.isNotBlank()) {
                         Text(text = "Sched $sched", style = TextStyle(fontSize = 11.sp, color = Ink.muted))
@@ -250,10 +258,9 @@ class NearestPlaneWidget : GlanceAppWidget() {
         }
     }
 
-    /** A gap between rows: at least 8dp, plus an equal share of the spare height. */
+    /** A gap between rows: an equal share of whatever height is spare, and none when there isn't any. */
     @Composable
     private fun ColumnScope.Gap() {
-        Spacer(GlanceModifier.height(8.dp))
         Spacer(GlanceModifier.defaultWeight())
     }
 
@@ -550,6 +557,10 @@ class NearestPlaneWidget : GlanceAppWidget() {
         @Volatile private var face: android.graphics.Typeface? = null
         const val REFRESHING = "refreshing…"
         const val UNKNOWN = "-"
+
+        /** Heights (dp) the full layout needs, worked out from its rows. */
+        private const val FULL_HEIGHT = 250f
+        private const val WEATHER_HEIGHT = 230f
     }
 }
 
