@@ -713,7 +713,7 @@ class MainActivity : ComponentActivity() {
                             scope.launch { checkForUpdate() }
                         }) { Text("Check again") }
                         OutlinedButton(onClick = {
-                            openUrl("https://github.com/Blueangelman36/NearestPlane")
+                            openUrl("https://github.com/ziah28/NearestPlane")
                         }) { Text("Source") }
                     }
                 }

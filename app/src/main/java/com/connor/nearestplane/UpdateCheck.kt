@@ -35,7 +35,7 @@ object UpdateCheck {
     // which needs Android Studio to become an app. Drafts never appear here
     // without credentials, and there are none in this request.
     private const val RELEASES =
-        "https://api.github.com/repos/Blueangelman36/NearestPlane/releases?per_page=10"
+        "https://api.github.com/repos/ziah28/NearestPlane/releases?per_page=10"
 
     private const val TIMEOUT_MS = 10_000
 
@@ -86,7 +86,7 @@ object UpdateCheck {
             version = tag.removePrefix("v").removePrefix("V"),
             apkUrl = apk,
             pageUrl = o.optString("html_url", "").ifBlank {
-                "https://github.com/Blueangelman36/NearestPlane/releases"
+                "https://github.com/ziah28/NearestPlane/releases"
             }
         )
     }

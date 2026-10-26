@@ -38,11 +38,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.connor.nearestplane"
+        applicationId = "uk.co.zhaq.overhead"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "1.13"
+        versionCode = 1
+        versionName = "0.1"
     }
 
     signingConfigs {

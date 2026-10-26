@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Nearest Plane</string>
-    <string name="widget_label">Nearest Plane</string>
+    <string name="app_name">Overhead</string>
+    <string name="widget_label">Overhead</string>
     <string name="widget_description">Shows the closest aircraft to your location.</string>
     <string name="weather_widget_label">Nearest METAR</string>
     <string name="weather_widget_description">Shows the closest airport\'s current weather.</string>
