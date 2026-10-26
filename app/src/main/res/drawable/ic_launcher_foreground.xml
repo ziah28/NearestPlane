@@ -1,17 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Adaptive-icon foreground: a simple aircraft silhouette, drawn on the standard
-  108dp canvas with the artwork kept inside the 72dp safe zone so no launcher
-  mask can clip it.
+  Adaptive-icon foreground on the standard 108dp canvas: plane C at 45 degrees,
+  a light-blue trail fading in behind it and a grey trail fading out ahead.
+  The plane sits inside the 66dp safe zone; the trails run off the edges on purpose.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <group android:translateX="18" android:translateY="18">
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M36,4 C38.2,4 40,7.6 40,12 L40,28 L66,44 L66,50 L40,42 L40,56 L48,62 L48,67 L36,64 L24,67 L24,62 L32,56 L32,42 L6,50 L6,44 L32,28 L32,12 C32,7.6 33.8,4 36,4 Z" />
+    <group android:pivotX="54" android:pivotY="54" android:rotation="-45">
+        <path android:pathData="M4,54L38,52.7L38,55.3Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear"
+                    android:startX="4" android:startY="54"
+                    android:endX="38" android:endY="54"
+                    android:startColor="#008EC5FF"
+                    android:endColor="#808EC5FF" />
+            </aapt:attr>
+        </path>
+        <path android:pathData="M74,52.9L104,54L74,55.1Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear"
+                    android:startX="74" android:startY="54"
+                    android:endX="104" android:endY="54"
+                    android:startColor="#7398A1AE"
+                    android:endColor="#0098A1AE" />
+            </aapt:attr>
+        </path>
+    </group>
+    <group android:pivotX="12" android:pivotY="12" android:rotation="45"
+        android:scaleX="1.75" android:scaleY="1.75"
+        android:translateX="42" android:translateY="42">
+        <path android:fillColor="#FF8EC5FF" android:pathData="M12,1.2C12.9,1.2 13.4,2.7 13.4,4.2V18.8L12,21.4L10.6,18.8V4.2C10.6,2.7 11.1,1.2 12,1.2Z" />
+        <path android:fillColor="#FF8EC5FF" android:pathData="M10.8,10L3.2,15.8L3.2,17L10.8,14.6Z" />
+        <path android:fillColor="#FF8EC5FF" android:pathData="M13.2,10L20.8,15.8L20.8,17L13.2,14.6Z" />
+        <path android:fillColor="#FF8EC5FF" android:pathData="M10.8,18.2L7.8,21.2L7.8,22L10.8,20.8Z" />
+        <path android:fillColor="#FF8EC5FF" android:pathData="M13.2,18.2L16.2,21.2L16.2,22L13.2,20.8Z" />
     </group>
 </vector>
