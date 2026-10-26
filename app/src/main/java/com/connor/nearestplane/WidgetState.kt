@@ -34,6 +34,17 @@ object WidgetState {
     val TO_CITY = stringPreferencesKey("to_city")
     val PROGRESS = intPreferencesKey("progress")
     val ETA = stringPreferencesKey("eta")                // "Lands ~4 min"
+    // Flight times: shown time, scheduled time, pill text, and 1 late / 0 on time / -1 unknown.
+    val DEP_TIME = stringPreferencesKey("dep_time")
+    val DEP_SCHED = stringPreferencesKey("dep_sched")
+    val DEP_PILL = stringPreferencesKey("dep_pill")
+    val DEP_LATE = intPreferencesKey("dep_late")
+    val DEP_DONE = booleanPreferencesKey("dep_done")
+    val ARR_TIME = stringPreferencesKey("arr_time")
+    val ARR_SCHED = stringPreferencesKey("arr_sched")
+    val ARR_PILL = stringPreferencesKey("arr_pill")
+    val ARR_LATE = intPreferencesKey("arr_late")
+    val ARR_DONE = booleanPreferencesKey("arr_done")
     val HEX = stringPreferencesKey("hex")                // the plane on the tile, for the detail screen
     val LOGO = stringPreferencesKey("logo")              // "U2" when that logo is saved on the phone
 }

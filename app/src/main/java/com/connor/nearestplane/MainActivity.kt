@@ -137,6 +137,8 @@ class MainActivity : ComponentActivity() {
         var pinError by remember { mutableStateOf<String?>(null) }
         var keyText by remember { mutableStateOf("") }
         var diagOpen by remember { mutableStateOf(false) }
+        // Bumped when a key is saved, so its status line re-reads.
+        var keyCheck by remember { mutableStateOf(0) }
         var update by remember { mutableStateOf<Release?>(null) }
 
         // A sideloaded app has no update channel, so nothing would otherwise
@@ -327,7 +329,12 @@ class MainActivity : ComponentActivity() {
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Pill("Save key", fill = p.accentFill, text = p.onAccent, enabled = keyText.isNotBlank()) {
-                            scope.launch { AppSettings.setTimesKey(activity, keyText); keyText = "" }
+                            scope.launch {
+                                AppSettings.setTimesKey(activity, keyText)
+                                FlightTimes.resetStatus(activity)
+                                keyText = ""
+                                keyCheck++
+                            }
                         }
                         if (savedKey != null) {
                             Pill("Remove", fill = p.badge, text = p.ink) {
@@ -335,11 +342,16 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-                    Text(
-                        if (savedKey != null) "Key saved on this phone" else "No key yet. Times show as --:-- without one.",
-                        style = body(12.sp, FontWeight.Medium),
-                        color = if (savedKey != null) p.ok else p.muted
-                    )
+                    val status = remember(savedKey, keyCheck) { FlightTimes.keyStatus(activity) }
+                    val used = remember(savedKey, keyCheck) { FlightTimes.lookupsThisMonth(activity) }
+                    val (statusText, statusColour) = when {
+                        savedKey == null -> "No key yet. Times show as --:-- without one." to p.muted
+                        status == FlightTimes.KeyStatus.REJECTED -> "AeroDataBox rejected this key. Check it and paste it again." to p.warn
+                        status == FlightTimes.KeyStatus.LIMIT -> "This month's free lookups are used up. Times return next month." to p.warn
+                        status == FlightTimes.KeyStatus.WORKS -> "Key works · $used of about 200 lookups used this month" to p.ok
+                        else -> "Key saved. It's checked on the next new flight." to p.muted
+                    }
+                    Text(statusText, style = body(12.sp, FontWeight.Medium), color = statusColour)
                     Text("Times by AeroDataBox", style = body(11.sp), color = p.muted)
                 }
 

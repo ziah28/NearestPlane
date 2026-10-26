@@ -102,6 +102,8 @@ class RefreshWorker(
                 it[WidgetState.ETA] = ""
                 it[WidgetState.LOGO] = ""
                 it[WidgetState.HEX] = ""
+                it[WidgetState.DEP_TIME] = ""
+                it[WidgetState.ARR_TIME] = ""
             }
             Diagnostics.noteOk(context, "plane")
             return Result.success()
@@ -160,6 +162,8 @@ class RefreshWorker(
                 ?.let { code -> if (runCatching { AirlineLogos.ensure(context, code) }.getOrDefault(false)) code else "" }
                 .orEmpty()
             val pass = BoardingPass.from(plane, report)
+            // Saved times cost nothing; a new flight costs one lookup. Never fails the tile.
+            val times = runCatching { FlightTimes.forPlane(context, plane) }.getOrNull()
 
             writeTiles(context) { p ->
                 p[WidgetState.STATUS] = "ok"
@@ -185,7 +189,25 @@ class RefreshWorker(
                 p[WidgetState.PROGRESS] = pass.progress
                 p[WidgetState.ETA] = pass.eta
                 p[WidgetState.LOGO] = logo
+                writeTime(p, times?.departure, WidgetState.DEP_TIME, WidgetState.DEP_SCHED, WidgetState.DEP_PILL, WidgetState.DEP_LATE, WidgetState.DEP_DONE)
+                writeTime(p, times?.arrival, WidgetState.ARR_TIME, WidgetState.ARR_SCHED, WidgetState.ARR_PILL, WidgetState.ARR_LATE, WidgetState.ARR_DONE)
             }
+        }
+
+        private fun writeTime(
+            p: MutablePreferences,
+            t: FlightTime?,
+            time: androidx.datastore.preferences.core.Preferences.Key<String>,
+            sched: androidx.datastore.preferences.core.Preferences.Key<String>,
+            pill: androidx.datastore.preferences.core.Preferences.Key<String>,
+            late: androidx.datastore.preferences.core.Preferences.Key<Int>,
+            done: androidx.datastore.preferences.core.Preferences.Key<Boolean>
+        ) {
+            p[time] = t?.shown.orEmpty()
+            p[sched] = t?.scheduled.orEmpty()
+            p[pill] = t?.pill.orEmpty()
+            p[late] = if (t == null || t.delayMin == null) -1 else if (t.late) 1 else 0
+            p[done] = t?.actual ?: false
         }
 
         internal suspend fun writeTiles(context: Context, block: (MutablePreferences) -> Unit) {

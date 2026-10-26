@@ -82,6 +82,10 @@ class NearestPlaneWidget : GlanceAppWidget() {
         val badge = DayNight(day = Color(0xFFEEF1F6), night = Color(0xFF222833))
         val accent = DayNight(day = Color(0xFF2F6FED), night = Color(0xFF8EC5FF))
         val warn = DayNight(day = Color(0xFFB4400B), night = Color(0xFFFF8A4C))
+        val ok = DayNight(day = Color(0xFF1B7F45), night = Color(0xFF5BD48A))
+        val okFill = DayNight(day = Color(0xFFE6F4EC), night = Color(0xFF16301F))
+        val late = DayNight(day = Color(0xFFB45309), night = Color(0xFFF5A524))
+        val lateFill = DayNight(day = Color(0xFFFDF0E1), night = Color(0xFF33240D))
     }
 
     private val codeWidth = 76
@@ -156,6 +160,30 @@ class NearestPlaneWidget : GlanceAppWidget() {
         )
 
         Spacer(GlanceModifier.height(14.dp))
+        Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.Vertical.Top) {
+            Box(modifier = GlanceModifier.defaultWeight()) {
+                TimeColumn(
+                    label = if (prefs[WidgetState.DEP_DONE] == true) "DEPARTED" else "DEPARTS",
+                    time = prefs[WidgetState.DEP_TIME].orEmpty(),
+                    sched = prefs[WidgetState.DEP_SCHED].orEmpty(),
+                    pill = prefs[WidgetState.DEP_PILL].orEmpty(),
+                    late = prefs[WidgetState.DEP_LATE] ?: -1,
+                    end = false
+                )
+            }
+            Box(modifier = GlanceModifier.defaultWeight(), contentAlignment = Alignment.TopEnd) {
+                TimeColumn(
+                    label = if (prefs[WidgetState.ARR_DONE] == true) "LANDED" else "ARRIVES",
+                    time = prefs[WidgetState.ARR_TIME].orEmpty(),
+                    sched = prefs[WidgetState.ARR_SCHED].orEmpty(),
+                    pill = prefs[WidgetState.ARR_PILL].orEmpty(),
+                    late = prefs[WidgetState.ARR_LATE] ?: -1,
+                    end = true
+                )
+            }
+        }
+
+        Spacer(GlanceModifier.height(14.dp))
         Box(modifier = GlanceModifier.fillMaxWidth().height(1.dp).background(Ink.rule)) {}
         Spacer(GlanceModifier.height(10.dp))
 
@@ -176,6 +204,40 @@ class NearestPlaneWidget : GlanceAppWidget() {
                     maxLines = 1,
                     style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink.ink)
                 )
+            }
+        }
+    }
+
+    /**
+     * One end of the flight: green within 15 minutes of schedule, amber when
+     * later, plain when there's nothing to judge it by, and --:-- when unknown.
+     */
+    @Composable
+    private fun TimeColumn(label: String, time: String, sched: String, pill: String, late: Int, end: Boolean) {
+        val colour = when (late) { 1 -> Ink.late; 0 -> Ink.ok; else -> Ink.ink }
+        Column(horizontalAlignment = if (end) Alignment.Horizontal.End else Alignment.Horizontal.Start) {
+            Text(text = label, style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Ink.muted))
+            DisplayText(time.ifBlank { "--:--" }, 20f, if (time.isBlank()) Ink.muted else colour)
+            if (sched.isNotBlank() || pill.isNotBlank()) {
+                Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                    if (sched.isNotBlank()) {
+                        Text(text = "Sched $sched", style = TextStyle(fontSize = 11.sp, color = Ink.muted))
+                    }
+                    if (pill.isNotBlank()) {
+                        if (sched.isNotBlank()) Spacer(GlanceModifier.width(6.dp))
+                        Box(
+                            modifier = GlanceModifier
+                                .background(if (late == 1) Ink.lateFill else Ink.okFill)
+                                .cornerRadius(6.dp)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = pill,
+                                style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (late == 1) Ink.late else Ink.ok)
+                            )
+                        }
+                    }
+                }
             }
         }
     }

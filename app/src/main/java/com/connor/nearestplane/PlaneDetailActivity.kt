@@ -216,14 +216,15 @@ class PlaneDetailActivity : ComponentActivity() {
 
             Rule()
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TimeBlock("Departed", "--:--", "No schedule yet", Alignment.Start)
+                val times = FlightTimes.cached(this@PlaneDetailActivity, plane)
+                FlightEnd(if (times?.departure?.actual == true) "Departed" else "Departs", times?.departure, Alignment.Start)
                 TimeBlock(
                     "Flown",
                     if (pass.progress >= 0) "${pass.progress}%" else "-",
                     pass.eta.ifBlank { " " },
                     Alignment.CenterHorizontally
                 )
-                TimeBlock("Arrives", "--:--", "No schedule yet", Alignment.End)
+                FlightEnd(if (times?.arrival?.actual == true) "Landed" else "Arrives", times?.arrival, Alignment.End)
             }
         }
 
@@ -274,7 +275,7 @@ class PlaneDetailActivity : ComponentActivity() {
         }
 
         Text(
-            "Position from adsb.fi · aircraft and route from adsbdb",
+            "Position from adsb.fi · aircraft and route from adsbdb · times by AeroDataBox",
             style = body(11.sp), color = p.muted, modifier = Modifier.padding(horizontal = 4.dp)
         )
     }
@@ -341,13 +342,39 @@ class PlaneDetailActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun TimeBlock(label: String, value: String, note: String, align: Alignment.Horizontal) {
+    private fun TimeBlock(
+        label: String,
+        value: String,
+        note: String,
+        align: Alignment.Horizontal,
+        colour: androidx.compose.ui.graphics.Color? = null
+    ) {
         val p = LocalPalette.current
         Column(horizontalAlignment = align, verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(label.uppercase(Locale.UK), style = body(10.sp, FontWeight.SemiBold).copy(letterSpacing = 0.8.sp), color = p.muted)
-            Text(value, style = display(22.sp), color = p.ink)
+            Text(value, style = display(22.sp), color = colour ?: p.ink)
             Text(note, style = body(11.sp), color = p.muted)
         }
+    }
+
+    /** Green within 15 minutes of schedule, amber when later, --:-- when there's no schedule. */
+    @Composable
+    private fun FlightEnd(label: String, t: FlightTime?, align: Alignment.Horizontal) {
+        val p = LocalPalette.current
+        if (t == null) {
+            TimeBlock(label, "--:--", "No schedule", align, p.muted)
+            return
+        }
+        val colour = when {
+            t.delayMin == null -> p.ink
+            t.late -> p.late
+            else -> p.ok
+        }
+        val note = listOf(
+            t.scheduled.takeIf { it.isNotBlank() }?.let { "Sched $it" },
+            t.pill.takeIf { it.isNotBlank() }
+        ).filterNotNull().joinToString(" · ").ifBlank { " " }
+        TimeBlock(label, t.shown, note, align, colour)
     }
 
     @Composable
