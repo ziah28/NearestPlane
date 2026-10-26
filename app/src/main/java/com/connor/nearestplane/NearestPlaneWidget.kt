@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.content.res.ResourcesCompat
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.ColorFilter
 import androidx.glance.GlanceId
@@ -208,11 +209,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
             }
             Spacer(GlanceModifier.width(12.dp))
             Column(modifier = GlanceModifier.defaultWeight()) {
-                Text(
-                    text = title,
-                    maxLines = 1,
-                    style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Bold, color = ColorProvider(Ink.ink))
-                )
+                DisplayText(title, 17f, Ink.ink)
                 if (sub.isNotBlank()) {
                     Text(
                         text = sub,
@@ -283,13 +280,51 @@ class NearestPlaneWidget : GlanceAppWidget() {
 
     @Composable
     private fun Code(code: String, align: TextAlign) {
-        Text(
-            text = code,
-            maxLines = 1,
-            modifier = GlanceModifier.fillMaxWidth(),
-            style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold, color = ColorProvider(Ink.ink), textAlign = align)
+        // Alignment comes from the column: start for the origin, end for the destination.
+        DisplayText(code, 28f, Ink.ink, maxWidthDp = codeWidth.toFloat())
+    }
+
+    /**
+     * Space Grotesk text. Widgets can only use the phone's built-in fonts, so
+     * the callsign and airport codes are drawn as crisp pictures in the app's
+     * own font instead, sized exactly to the text.
+     */
+    @Composable
+    private fun DisplayText(text: String, sizeSp: Float, color: Color, maxWidthDp: Float? = null) {
+        if (text.isBlank()) return
+        val context = LocalContext.current
+        val metrics = context.resources.displayMetrics
+        val px = android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, sizeSp, metrics)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = displayFace(context)
+            textSize = px
+            this.color = color.toArgb()
+        }
+        val fm = paint.fontMetrics
+        var w = kotlin.math.ceil(paint.measureText(text)).toInt().coerceAtLeast(1)
+        val h = kotlin.math.ceil(fm.descent - fm.ascent).toInt().coerceAtLeast(1)
+        // Too wide for its space: shrink to fit rather than clip.
+        maxWidthDp?.let { maxDp ->
+            val maxPx = (maxDp * metrics.density).toInt()
+            if (w > maxPx) {
+                paint.textSize = px * maxPx / w
+                w = maxPx
+            }
+        }
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val fm2 = paint.fontMetrics
+        Canvas(bmp).drawText(text, 0f, (h - (fm2.descent - fm2.ascent)) / 2f - fm2.ascent, paint)
+        Image(
+            provider = ImageProvider(bmp),
+            contentDescription = text,
+            contentScale = ContentScale.FillBounds,
+            modifier = GlanceModifier.size((w / metrics.density).dp, (h / metrics.density).dp)
         )
     }
+
+    private fun displayFace(context: Context): android.graphics.Typeface =
+        face ?: (runCatching { ResourcesCompat.getFont(context, R.font.space_grotesk_bold) }.getOrNull()
+            ?: android.graphics.Typeface.DEFAULT_BOLD).also { face = it }
 
     @Composable
     private fun City(city: String, align: TextAlign) {
@@ -378,6 +413,7 @@ class NearestPlaneWidget : GlanceAppWidget() {
     }
 
     companion object {
+        @Volatile private var face: android.graphics.Typeface? = null
         const val REFRESHING = "refreshing…"
         const val UNKNOWN = "-"
     }
